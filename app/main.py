@@ -12,6 +12,7 @@ from . import market, strategy
 from .alpaca_broker import AlpacaBroker
 from .bot import DEFAULT_BOT, Bot
 from .sim_broker import OrderError, SimBroker
+from .publish import Publisher
 from .tournament import Tournament
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,6 +69,7 @@ def get_broker():
 
 tournament = Tournament(DATA)
 bot = Bot(DATA, get_broker, load_settings, get_champion=tournament.champion)
+publisher = Publisher(ROOT, get_broker, bot, tournament, bot.log)
 app = FastAPI(title="StockBot")
 
 
@@ -87,6 +89,7 @@ def _loop():
             clock = market.market_clock()
             bot.step(clock)
             tournament.step(clock)
+            publisher.step(clock)
         except Exception as e:  # keep running no matter what
             bot.log(f"Loop error: {e}", "error")
             time.sleep(30)
@@ -332,6 +335,11 @@ def api_tournament_report():
     path = tournament.write_report()
     with open(path) as f:
         return {"path": os.path.relpath(path, ROOT), "markdown": f.read()}
+
+
+@app.post("/api/publish")
+def api_publish():
+    return {"result": publisher.publish()}
 
 
 @app.post("/api/tournament/reset")
