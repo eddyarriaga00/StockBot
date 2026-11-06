@@ -11,6 +11,15 @@ and a connection to Alpaca for paper trading or real money.
 ## Beginner lessons
 The **Learn** tab includes seven short lessons, retryable quizzes, saved browser progress, a searchable glossary, and a fictional-price practice calculator. Lessons never place orders, change your broker, or enable the bot. Progress is local to this browser and is separate from your trading data.
 
+## The website
+**https://eddyarriaga00.github.io/StockBot/** is the same app.
+- When the StockBot computer is on, enter its passcode (Settings → Control from the website → Show passcode on the Mac)
+  and everything works from any device: trading, the bot, the tournament, settings.
+- Otherwise it's a view-only mirror of the latest results, refreshed about every 2 hours during market hours.
+- How it connects: the Mac opens an encrypted Cloudflare tunnel (`brew install cloudflared`) and publishes its address.
+  Tunnel requests need a login token, the passcode can only be seen or changed on the Mac, wrong guesses lock out
+  for 15 minutes, and only the StockBot website may call the API. Turn it off any time in Settings.
+
 ## Screens
 - **Trade**: search, watchlist, live charts (1D to MAX, line or candles), key stats, news, and an order ticket
   (market / limit / stop / stop-limit / trailing stop, shares or dollars, day or GTC, take-profit / stop-loss) with a review step.
