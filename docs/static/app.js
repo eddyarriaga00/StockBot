@@ -564,7 +564,7 @@ let strategyNames = {};
 
 const RISK_FIELDS = [
   ["max_position_pct", "Max % in any one stock", 0.5], ["budget_pct", "% of account bot manages", 1],
-  ["cash_reserve_pct", "Cash reserve %", 0.5], ["stop_atr", "Trailing stop (× avg daily range)", 0.5],
+  ["cash_reserve_pct", "Cash reserve %", 0.5], ["stop_atr", "Trailing stop (× avg daily range, 0 = off)", 0.5],
   ["daily_loss_limit_pct", "Halt after daily loss %", 0.5],
 ];
 
