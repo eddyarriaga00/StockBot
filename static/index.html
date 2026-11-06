@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockBot</title>
+  <link rel="stylesheet" href="/static/style.css?v=2">
+  <script src="/static/vendor/lightweight-charts.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">◆</span> StockBot</div>
+  <div class="search">
+    <input id="search" placeholder="Search stocks & ETFs" autocomplete="off">
+    <div id="search-results" class="dropdown hidden"></div>
+  </div>
+  <nav>
+    <button data-view="trade" class="active">Trade</button>
+    <button data-view="portfolio">Portfolio</button>
+    <button data-view="bot">Bot</button>
+    <button data-view="settings">Settings</button>
+  </nav>
+  <div class="status">
+    <span id="broker-badge" class="badge">SIMULATOR</span>
+    <span id="market-pill" class="pill">—</span>
+  </div>
+</header>
+
+<!-- TRADE -->
+<main id="view-trade" class="view trade">
+  <aside class="watchlist card">
+    <div class="card-head"><h3>Watchlist</h3><button id="wl-toggle" class="ghost small" title="Add/remove current symbol">＋</button></div>
+    <div id="watchlist"></div>
+  </aside>
+
+  <section class="center">
+    <div class="card">
+      <div class="quote-head">
+        <div>
+          <div class="sym-row"><h1 id="q-symbol">—</h1><span id="q-exchange" class="muted"></span></div>
+          <div id="q-name" class="muted"></div>
+        </div>
+        <div class="price-block">
+          <div id="q-price" class="big">—</div>
+          <div id="q-change"></div>
+          <div id="q-session" class="muted small"></div>
+        </div>
+      </div>
+      <div id="chart" class="chart"></div>
+      <div class="chart-controls">
+        <div class="seg" id="ranges">
+          <button data-r="1d" class="active">1D</button><button data-r="5d">1W</button><button data-r="1mo">1M</button>
+          <button data-r="3mo">3M</button><button data-r="1y">1Y</button><button data-r="5y">5Y</button><button data-r="max">MAX</button>
+        </div>
+        <div class="seg" id="chart-type"><button data-t="area" class="active">Line</button><button data-t="candle">Candles</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Key statistics</h3>
+      <div class="stats" id="q-stats"></div>
+    </div>
+
+    <div class="card" id="my-position-card">
+      <h3>Your position</h3>
+      <div id="my-position" class="muted">You don't own this stock.</div>
+    </div>
+
+    <div class="card">
+      <h3>News</h3>
+      <div id="news" class="news muted">Loading…</div>
+    </div>
+  </section>
+
+  <aside class="ticket card" id="ticket">
+    <div class="seg full" id="side">
+      <button data-side="buy" class="active buy">Buy</button><button data-side="sell" class="sell">Sell</button>
+    </div>
+    <div id="ticket-form">
+      <label>Order type
+        <select id="o-type">
+          <option value="market">Market</option>
+          <option value="limit">Limit</option>
+          <option value="stop">Stop</option>
+          <option value="stop_limit">Stop limit</option>
+          <option value="trailing_stop">Trailing stop</option>
+        </select>
+      </label>
+      <label id="row-unit">Buy in
+        <select id="o-unit"><option value="shares">Shares</option><option value="dollars">Dollars</option></select>
+      </label>
+      <label><span id="qty-label">Shares</span>
+        <input id="o-qty" type="number" min="0" step="any" placeholder="0">
+      </label>
+      <label id="row-limit" class="hidden">Limit price<input id="o-limit" type="number" step="0.01" placeholder="$0.00"></label>
+      <label id="row-stop" class="hidden">Stop price<input id="o-stop" type="number" step="0.01" placeholder="$0.00"></label>
+      <label id="row-trail" class="hidden">Trail %<input id="o-trail" type="number" step="0.1" placeholder="5"></label>
+      <label id="row-tif">Time in force
+        <select id="o-tif"><option value="day">Good for day</option><option value="gtc">Good till canceled</option></select>
+      </label>
+      <label class="check" id="row-bracket"><input type="checkbox" id="o-bracket"> Add take-profit / stop-loss</label>
+      <div id="bracket-fields" class="hidden two">
+        <label>Take profit<input id="o-tp" type="number" step="0.01" placeholder="$"></label>
+        <label>Stop loss<input id="o-sl" type="number" step="0.01" placeholder="$"></label>
+      </div>
+      <div class="est">
+        <div><span id="est-px-label">Ask price</span><span id="est-px">—</span></div>
+        <div><span id="est-label">Estimated cost</span><strong id="est-total">$0.00</strong></div>
+      </div>
+      <button id="review" class="primary full">Review order</button>
+      <div class="muted small center" id="avail">—</div>
+    </div>
+    <div id="ticket-review" class="hidden">
+      <h3 id="rv-title">Review</h3>
+      <div id="rv-lines" class="review-lines"></div>
+      <p id="rv-note" class="muted small"></p>
+      <button id="submit" class="primary full">Submit order</button>
+      <button id="edit" class="ghost full">Edit</button>
+    </div>
+  </aside>
+</main>
+
+<!-- PORTFOLIO -->
+<main id="view-portfolio" class="view hidden">
+  <div class="card">
+    <div class="quote-head">
+      <div><div class="muted">Account value</div><div id="p-equity" class="big">—</div><div id="p-day"></div></div>
+      <div class="kpis" id="p-kpis"></div>
+    </div>
+    <div id="equity-chart" class="chart short"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Positions</h3></div>
+    <div class="table-wrap"><table id="positions-table"></table></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Open orders</h3><button id="cancel-all" class="ghost small">Cancel all</button></div>
+    <div class="table-wrap"><table id="open-orders"></table></div>
+  </div>
+  <div class="card">
+    <h3>Order history</h3>
+    <div class="table-wrap"><table id="order-history"></table></div>
+  </div>
+</main>
+
+<!-- BOT -->
+<main id="view-bot" class="view hidden">
+  <div class="card bot-hero">
+    <div>
+      <h2>Auto-trader</h2>
+      <div id="bot-summary" class="muted">—</div>
+    </div>
+    <div class="bot-actions">
+      <label class="switch"><input type="checkbox" id="bot-enabled"><span></span><b id="bot-enabled-label">Off</b></label>
+      <select id="bot-strategy" title="Which strategy your account follows"></select>
+      <div class="seg" id="bot-mode"><button data-m="auto">Full auto</button><button data-m="approve">Approve each</button></div>
+      <button id="bot-run" class="ghost">Rebalance now</button>
+      <button id="bot-kill" class="danger">KILL SWITCH</button>
+    </div>
+  </div>
+  <div class="card hidden" id="pending-card">
+    <h3>Waiting for your approval</h3>
+    <div id="pending"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Strategy tournament</h3><button id="report-run" class="ghost small">Write report card</button></div>
+    <p id="t-champion" class="muted"></p>
+    <div class="table-wrap"><table id="t-table"></table></div>
+    <h3 class="sub">Live paper results (each started with $100k)</h3>
+    <div id="t-chart" class="chart short"></div>
+    <div id="t-legend" class="legend"></div>
+    <p class="muted small">Every strategy trades its own fake $100,000 on live prices. Under 60 trading days, results are mostly luck.</p>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="card-head"><h3>10-year backtest (growth of $10k)</h3><button id="bt-run" class="ghost small">Re-run</button></div>
+      <div id="bt-chart" class="chart short"></div>
+      <div id="bt-legend" class="legend"></div>
+      <p id="bt-caveat" class="muted small"></p>
+    </div>
+    <div class="card">
+      <h3>Risk limits</h3>
+      <form id="risk-form" class="risk"></form>
+      <button id="risk-save" class="primary">Save limits</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Today's scan</h3><button id="scan-run" class="ghost small">Scan now</button></div>
+    <div id="regime" class="muted"></div>
+    <div id="strategy-picks" class="picks"></div>
+    <h3 class="sub">Stock-by-stock signals</h3>
+    <div class="table-wrap"><table id="scan-table"></table></div>
+  </div>
+  <div class="card">
+    <h3>Bot activity</h3>
+    <div id="bot-log" class="log"></div>
+  </div>
+</main>
+
+<!-- SETTINGS -->
+<main id="view-settings" class="view hidden">
+  <div class="card">
+    <h2>Where trades go</h2>
+    <div class="brokers" id="brokers">
+      <button data-b="sim"><b>Simulator</b><span>Live prices, fake $100k. Nothing to set up.</span></button>
+      <button data-b="alpaca_paper"><b>Alpaca Paper</b><span>Real broker, fake money. Needs free account.</span></button>
+      <button data-b="alpaca_live"><b>Alpaca Live</b><span>Real money. Only after paper results look good.</span></button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Connect Alpaca (one time, about 5 minutes)</h3>
+    <ol class="steps">
+      <li>Sign up at <a href="https://alpaca.markets" target="_blank" rel="noopener">alpaca.markets</a> (free).</li>
+      <li>In the Alpaca dashboard, switch to <b>Paper Trading</b> and click <b>Generate API Keys</b>.</li>
+      <li>Paste both keys below, click Save, then pick <b>Alpaca Paper</b> above.</li>
+    </ol>
+    <div class="two">
+      <label>Paper API key<input id="k-pk" placeholder="PK…" autocomplete="off"></label>
+      <label>Paper secret<input id="k-ps" type="password" autocomplete="off"></label>
+      <label>Live API key<input id="k-lk" placeholder="AK…" autocomplete="off"></label>
+      <label>Live secret<input id="k-ls" type="password" autocomplete="off"></label>
+    </div>
+    <button id="keys-save" class="primary">Save keys</button>
+    <p class="muted small">Keys are stored only on this Mac in <code>data/settings.json</code> (owner-only file).</p>
+  </div>
+  <div class="card">
+    <h3>Simulator</h3>
+    <p class="muted">Start over with a fresh fake account.</p>
+    <div class="row"><input id="reset-cash" type="number" value="100000" step="1000"><button id="reset" class="danger">Reset simulator</button></div>
+  </div>
+</main>
+
+<div id="toasts"></div>
+<script src="/static/app.js?v=2"></script>
+</body>
+</html>
