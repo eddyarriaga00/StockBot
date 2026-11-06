@@ -21,9 +21,11 @@ const state = {
 function localGet(k) { try { return localStorage.getItem("sb:" + k); } catch { return null; } }
 function localSet(k, v) { try { localStorage.setItem("sb:" + k, v); } catch {} }
 
-// On the public GitHub Pages site there is no server: the app reads the snapshot the bot publishes
-// (docs/data/) and every control that would change something is turned off.
-const SNAPSHOT = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has("viewonly");
+// On the public GitHub Pages site there is no local server. If the StockBot computer is online and you log in
+// with its passcode, the site sends every call to it through its secure tunnel (full control). Otherwise the
+// site reads the snapshot the bot publishes (docs/data/) and every control that would change something is off.
+let SNAPSHOT = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has("viewonly");
+const REMOTE = { base: null, token: localGet("remote-token") };
 const SNAPSHOT_RANGES = ["1d", "5d", "1mo", "1y", "5y"];
 let core = null;
 const symFiles = {};
@@ -59,14 +61,64 @@ async function snapshotApi(path, opts) {
 
 async function api(path, opts = {}) {
   if (SNAPSHOT) return snapshotApi(path, opts);
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  });
+  const headers = { "Content-Type": "application/json" };
+  if (REMOTE.base) headers.Authorization = "Bearer " + REMOTE.token;
+  let res;
+  try {
+    res = await fetch((REMOTE.base || "") + path, { ...opts, headers, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined });
+  } catch (e) {
+    throw new Error(REMOTE.base ? "Can't reach the StockBot computer right now." : e.message);
+  }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && REMOTE.base) {
+    localSet("remote-token", "");
+    toast("Your login expired. Please enter the passcode again.", "bad");
+    setTimeout(() => location.reload(), 1500);
+  }
   if (!res.ok) throw new Error(data.detail || res.statusText);
   return data;
+}
+
+// ---------- website remote control ----------
+async function connectRemote() {
+  const base = core?.remote_url;
+  const reachable = base && await fetch(base + "/api/remote/ping", { signal: AbortSignal.timeout(6000) }).then((r) => r.ok).catch(() => false);
+  if (!reachable) {
+    $("#remote-status").textContent = "The StockBot computer is offline right now, so this shows the latest published results.";
+    return false;
+  }
+  if (REMOTE.token) {
+    const ok = await fetch(base + "/api/remote/whoami", { headers: { Authorization: "Bearer " + REMOTE.token }, signal: AbortSignal.timeout(6000) })
+      .then((r) => r.ok).catch(() => false);
+    if (ok) {
+      REMOTE.base = base;
+      SNAPSHOT = false;
+      document.body.classList.add("remote");
+      return true;
+    }
+  }
+  $("#remote-status").textContent = "The StockBot computer is online. Enter its passcode to trade and control the bot from here.";
+  $("#remote-login").classList.remove("hidden");
+  $("#remote-login").onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = $("#remote-login button");
+    btn.disabled = true;
+    try {
+      const r = await fetch(base + "/api/remote/login", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: $("#remote-passcode").value }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.detail || "Login failed.");
+      localSet("remote-token", d.token);
+      location.reload();
+    } catch (err) { toast(err.message, "bad"); btn.disabled = false; }
+  };
+  return false;
+}
+
+async function logoutRemote() {
+  await api("/api/remote/logout", { method: "POST" }).catch(() => {});
+  localSet("remote-token", "");
+  location.reload();
 }
 const money = (v, d = 2) => v == null || isNaN(v) ? "—" :
   (v < 0 ? "-" : "") + "$" + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -707,6 +759,37 @@ $("#reset").addEventListener("click", async () => {
   } catch (e) { toast(e.message, "bad"); }
 });
 
+// ---------- website control settings (on the Mac only) ----------
+let passcodeShown = false;
+async function refreshRemoteCard() {
+  if (REMOTE.base || SNAPSHOT) return;
+  const c = await api("/api/remote/config").catch(() => null);
+  if (!c) return;
+  $("#remote-enabled").checked = c.enabled;
+  const status = !c.cloudflared_installed ? '<span class="down">Tunnel tool missing (brew install cloudflared)</span>'
+    : !c.enabled ? '<span class="muted">Off</span>' : c.url ? '<span class="up">Online</span>' : '<span class="muted">Connecting…</span>';
+  $("#remote-info").innerHTML = [["Status", status], ["Passcode", passcodeShown ? `<code>${esc(c.passcode)}</code>` : "••••-••••-••••"],
+    ["Signed-in devices", c.devices]].map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
+  $("#remote-reveal").textContent = passcodeShown ? "Hide passcode" : "Show passcode";
+}
+$("#remote-reveal").addEventListener("click", () => { passcodeShown = !passcodeShown; refreshRemoteCard(); });
+$("#remote-enabled").addEventListener("change", async (e) => {
+  await api("/api/remote/config", { method: "POST", body: { enabled: e.target.checked } });
+  toast(e.target.checked ? "Website control on." : "Website control off. The website is view-only.", "ok");
+  refreshRemoteCard();
+});
+$("#remote-new").addEventListener("click", async () => {
+  if (!confirm("Make a new passcode? Every device that's logged in will be signed out.")) return;
+  await api("/api/remote/config", { method: "POST", body: { new_passcode: true } });
+  passcodeShown = true; toast("New passcode created.", "ok"); refreshRemoteCard();
+});
+$("#remote-revoke").addEventListener("click", async () => {
+  if (!confirm("Sign out every device using the website?")) return;
+  await api("/api/remote/config", { method: "POST", body: { revoke_all: true } });
+  toast("All devices signed out.", "ok"); refreshRemoteCard();
+});
+$("#remote-logout").addEventListener("click", logoutRemote);
+
 // ---------- navigation ----------
 function showView(v) {
   state.view = v;
@@ -718,7 +801,7 @@ function showView(v) {
     if (!Object.keys(btLines).length) loadBacktest(false);
     if (!state.bot?.last_scan) api("/api/bot/scan", { method: "POST" }).then(refreshBot).catch(() => {});
   }
-  if (v === "settings") refreshSettings();
+  if (v === "settings") { refreshSettings(); refreshRemoteCard(); }
 }
 $("nav").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) showView(b.dataset.view); });
 
@@ -739,6 +822,10 @@ async function refreshClock() {
 
 // ---------- boot ----------
 (async function boot() {
+  if (SNAPSHOT) {
+    core = await fetch("data/core.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+    await connectRemote();
+  }
   if (SNAPSHOT) {
     document.body.classList.add("snapshot");
     $$("#ranges button").forEach((b) => { if (!SNAPSHOT_RANGES.includes(b.dataset.r)) b.remove(); });

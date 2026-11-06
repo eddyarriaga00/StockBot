@@ -4,8 +4,9 @@ import os
 import threading
 import time
 
-from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import market, strategy
@@ -13,11 +14,14 @@ from .alpaca_broker import AlpacaBroker
 from .bot import DEFAULT_BOT, Bot
 from .sim_broker import OrderError, SimBroker
 from .publish import Publisher
+from .remote import Remote
 from .tournament import Tournament
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
 STATIC = os.path.join(ROOT, "static")
+PORT = 8777
+SITE_ORIGIN = "https://eddyarriaga00.github.io"  # the public website allowed to control this server
 SETTINGS = os.path.join(DATA, "settings.json")
 os.makedirs(DATA, exist_ok=True)
 
@@ -69,8 +73,24 @@ def get_broker():
 
 tournament = Tournament(DATA)
 bot = Bot(DATA, get_broker, load_settings, get_champion=tournament.champion)
-publisher = Publisher(ROOT, get_broker, bot, tournament, load_settings, bot.log)
+publisher = Publisher(ROOT, get_broker, bot, tournament, load_settings, bot.log, get_remote_url=lambda: remote.url)
+remote = Remote(DATA, PORT, on_url_change=lambda: publisher.publish())
 app = FastAPI(title="StockBot")
+
+OPEN_REMOTE_PATHS = {"/api/remote/ping", "/api/remote/login"}
+LOCAL_ONLY_PATHS = {"/api/remote/config"}
+
+
+@app.middleware("http")
+async def _auth(request: Request, call_next):
+    """Requests from this Mac pass. Requests through the tunnel need a valid login token."""
+    path = request.url.path
+    if path.startswith("/api/") and request.method != "OPTIONS" and Remote.is_remote(request.headers):
+        if path in LOCAL_ONLY_PATHS:
+            return JSONResponse({"detail": "This setting can only be changed on the StockBot computer."}, status_code=403)
+        if path not in OPEN_REMOTE_PATHS and not remote.check(request.headers.get("authorization")):
+            return JSONResponse({"detail": "Please log in with your StockBot passcode."}, status_code=401)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -103,6 +123,51 @@ def _err(e):
 @app.on_event("startup")
 def _startup():
     threading.Thread(target=_loop, daemon=True).start()
+    remote.start()
+
+
+@app.on_event("shutdown")
+def _shutdown():
+    remote.stop()
+
+
+# ---------- remote control ----------
+@app.get("/api/remote/ping")
+def api_remote_ping():
+    return {"ok": True, "app": "StockBot"}
+
+
+@app.post("/api/remote/login")
+def api_remote_login(request: Request, body: dict = Body(...)):
+    token, error = remote.login(body.get("passcode"), request.headers.get("user-agent", ""))
+    if error:
+        raise HTTPException(status_code=429 if "Too many" in error else 401, detail=error)
+    bot.log("A device logged in to control StockBot from the website.", "warn")
+    return {"token": token}
+
+
+@app.post("/api/remote/logout")
+def api_remote_logout(request: Request):
+    remote.logout(request.headers.get("authorization"))
+    return {"ok": True}
+
+
+@app.get("/api/remote/whoami")
+def api_remote_whoami(request: Request):
+    return {"remote": Remote.is_remote(request.headers)}
+
+
+@app.get("/api/remote/config")
+def api_remote_config():
+    return remote.config()
+
+
+@app.post("/api/remote/config")
+def api_remote_config_set(body: dict = Body(...)):
+    try:
+        return remote.update(body)
+    except ValueError as e:
+        _err(e)
 
 
 # ---------- market data ----------
@@ -379,3 +444,8 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 @app.get("/")
 def index():
     return FileResponse(os.path.join(STATIC, "index.html"))
+
+
+# Outermost layer: lets the public website (and only it) call this API from a browser.
+app.add_middleware(CORSMiddleware, allow_origins=[SITE_ORIGIN], allow_methods=["*"],
+                   allow_headers=["Authorization", "Content-Type"], max_age=3600)

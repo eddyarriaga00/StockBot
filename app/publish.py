@@ -21,13 +21,14 @@ DOCS = "docs"
 
 
 class Publisher:
-    def __init__(self, root, get_broker, bot, tournament, load_settings, log):
+    def __init__(self, root, get_broker, bot, tournament, load_settings, log, get_remote_url=lambda: None):
         self.root = root
         self.get_broker = get_broker
         self.bot = bot
         self.tournament = tournament
         self.load_settings = load_settings
         self.log = log
+        self.get_remote_url = get_remote_url
         self.path = os.path.join(root, "data", "publish.json")
         self.state = {"last": 0, "last_close": None}
         self.lock = threading.Lock()  # the loop and the API button must not push at the same time
@@ -57,6 +58,7 @@ class Publisher:
         bot_status["pending"] = []
         core = {
             "updated": time.time(),
+            "remote_url": self.get_remote_url(),  # where the website can reach this Mac (login required)
             "account": {"account": broker.account(), "positions": positions},
             "equity": broker.equity_history()[-3000:],
             "orders": {"open": open_, "closed": closed, "all": open_ + closed},
