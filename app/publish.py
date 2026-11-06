@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -29,6 +30,7 @@ class Publisher:
         self.log = log
         self.path = os.path.join(root, "data", "publish.json")
         self.state = {"last": 0, "last_close": None}
+        self.lock = threading.Lock()  # the loop and the API button must not push at the same time
         if os.path.exists(self.path):
             with open(self.path) as f:
                 self.state.update(json.load(f))
@@ -105,6 +107,10 @@ class Publisher:
 
     # ---------- publish ----------
     def publish(self, push=True):
+        with self.lock:
+            return self._publish(push)
+
+    def _publish(self, push):
         n = self.build()
         self.state["last"] = time.time()
         self._save()
