@@ -1,159 +1,256 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>StockBot Report Card</title>
-<meta name="description" content="Live paper-trading results from StockBot's strategy tournament. Fake money, real prices.">
-<script src="vendor/lightweight-charts.js"></script>
-<style>
-:root { --bg:#0b0e13; --panel:#12161d; --panel-2:#181d26; --line:#232a35; --text:#e7ebf0; --muted:#8a94a3; --up:#22c38e; --down:#f2555a; --accent:#4c8dff; --warn:#f5b041;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif; }
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; }
-header { padding: 18px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-header h1 { margin: 0; font-size: 19px; } header .logo { color: var(--up); }
-.badge { font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px; background: var(--panel-2); color: var(--accent); letter-spacing: .04em; }
-.muted { color: var(--muted); } .small { font-size: 12px; } .up { color: var(--up); } .down { color: var(--down); } .champ { color: var(--warn); font-weight: 700; }
-main { max-width: 1200px; margin: 0 auto; padding: 16px 20px 48px; display: flex; flex-direction: column; gap: 16px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
-h2 { font-size: 15px; margin: 0 0 12px; }
-.big { font-size: 34px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.kpis { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 10px; }
-.kpis div > span { display: block; color: var(--muted); font-size: 12px; } .kpis b { font-size: 17px; font-variant-numeric: tabular-nums; }
-.chart { height: 280px; width: 100%; margin-top: 12px; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-td { padding: 9px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-td.r, th.r { text-align: right; }
-td .about { display: block; color: var(--muted); font-size: 11px; white-space: normal; max-width: 300px; }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); margin-top: 8px; }
-.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
-.log div { padding: 7px 0; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 130px 1fr; gap: 10px; font-size: 13px; }
-.note { color: var(--muted); font-size: 12px; line-height: 1.5; }
-.empty { color: var(--muted); padding: 12px 0; }
-@media (max-width: 760px) { main { padding: 12px 16px 40px; } .grid2 { grid-template-columns: 1fr; } .big { font-size: 28px; } .log div { grid-template-columns: 1fr; gap: 2px; } }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockBot</title>
+  <meta name="description" content="StockBot: a trading bot that runs a live tournament of strategies on fake money. Watch its trades, charts, and results.">
+  <link rel="stylesheet" href="static/style.css?v=3">
+  <script src="static/vendor/lightweight-charts.js"></script>
 </head>
 <body>
-<header>
-  <h1><span class="logo">◆</span> StockBot Report Card</h1>
-  <span class="badge">PAPER TRADING · FAKE MONEY</span>
-  <span id="updated" class="muted small"></span>
+<header class="topbar">
+  <div class="brand"><span class="logo">◆</span> StockBot</div>
+  <div class="search">
+    <input id="search" placeholder="Search stocks & ETFs" autocomplete="off">
+    <div id="search-results" class="dropdown hidden"></div>
+  </div>
+  <nav>
+    <button data-view="learn">Learn</button>
+    <button data-view="trade" class="active">Trade</button>
+    <button data-view="portfolio">Portfolio</button>
+    <button data-view="bot">Bot</button>
+    <button data-view="settings" class="live-only">Settings</button>
+  </nav>
+  <div class="status">
+    <span id="broker-badge" class="badge">SIMULATOR</span>
+    <span id="market-pill" class="pill">—</span>
+  </div>
 </header>
-<main>
-  <div class="card">
-    <div class="muted">Main account value</div>
-    <div id="equity" class="big">—</div>
-    <div id="day"></div>
-    <div id="kpis" class="kpis"></div>
-    <div id="eq-chart" class="chart"></div>
-  </div>
+<div class="snapshot-banner snapshot-only">
+  <b>Live view of StockBot.</b> The bot trades fake money on real prices from its home computer; this site shows what it's doing
+  (last update <span id="snapshot-updated">—</span>). Buttons that would trade are turned off here.
+  <a href="https://github.com/eddyarriaga00/StockBot" target="_blank" rel="noopener">Get the code</a>
+</div>
 
+<main id="view-learn" class="view hidden"></main>
+
+<!-- TRADE -->
+<main id="view-trade" class="view trade">
+  <aside class="watchlist card">
+    <div class="card-head"><h3>Watchlist</h3><button id="wl-toggle" class="ghost small live-only" title="Add/remove current symbol">＋</button></div>
+    <div id="watchlist"></div>
+  </aside>
+
+  <section class="center">
+    <div class="card beginner-invite"><div><b>New to stocks? Start here.</b><p class="muted">Learn the basics in seven bite-sized lessons, then practice with fictional prices.</p></div><button class="primary" data-open-lesson="ownership">Start learning →</button></div>
+    <div class="card">
+      <div class="quote-head">
+        <div>
+          <div class="sym-row"><h1 id="q-symbol">—</h1><span id="q-exchange" class="muted"></span></div>
+          <div id="q-name" class="muted"></div>
+        </div>
+        <div class="price-block">
+          <div id="q-price" class="big">—</div>
+          <div id="q-change"></div>
+          <div id="q-session" class="muted small"></div>
+        </div>
+      </div>
+      <div id="chart" class="chart"></div>
+      <div class="chart-controls">
+        <div class="seg" id="ranges">
+          <button data-r="1d" class="active">1D</button><button data-r="5d">1W</button><button data-r="1mo">1M</button>
+          <button data-r="3mo">3M</button><button data-r="1y">1Y</button><button data-r="5y">5Y</button><button data-r="max">MAX</button>
+        </div>
+        <div class="seg" id="chart-type"><button data-t="area" class="active">Line</button><button data-t="candle">Candles</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Key statistics</h3>
+      <div class="stats" id="q-stats"></div>
+    </div>
+
+    <div class="card" id="my-position-card">
+      <h3>Your position</h3>
+      <div id="my-position" class="muted">You don't own this stock.</div>
+    </div>
+
+    <div class="card">
+      <h3>News</h3>
+      <div id="news" class="news muted">Loading…</div>
+    </div>
+  </section>
+
+  <aside class="ticket card" id="ticket">
+    <div class="snapshot-only ticket-note">
+      <h3>Trading is off on this website</h3>
+      <p class="muted">This is the public view of StockBot. Orders are placed by the bot (or its owner) in the StockBot app on its home computer, using fake money.</p>
+      <p class="muted">The arrows on the chart show where the account bought ▲ and sold ▼.</p>
+      <a class="ghost full btn-link" href="https://github.com/eddyarriaga00/StockBot#start-it" target="_blank" rel="noopener">Run your own StockBot</a>
+    </div>
+    <div class="seg full" id="side">
+      <button data-side="buy" class="active buy">Buy</button><button data-side="sell" class="sell">Sell</button>
+    </div>
+    <div id="ticket-form">
+      <label>Order type
+        <select id="o-type">
+          <option value="market">Market</option>
+          <option value="limit">Limit</option>
+          <option value="stop">Stop</option>
+          <option value="stop_limit">Stop limit</option>
+          <option value="trailing_stop">Trailing stop</option>
+        </select>
+      </label>
+      <p id="order-help" class="muted small"></p>
+      <button class="ghost small" data-open-lesson="orders">Explain order types</button>
+      <label id="row-unit">Buy in
+        <select id="o-unit"><option value="shares">Shares</option><option value="dollars">Dollars</option></select>
+      </label>
+      <label><span id="qty-label">Shares</span>
+        <input id="o-qty" type="number" min="0" step="any" placeholder="0">
+      </label>
+      <label id="row-limit" class="hidden">Limit price<input id="o-limit" type="number" step="0.01" placeholder="$0.00"></label>
+      <label id="row-stop" class="hidden">Stop price<input id="o-stop" type="number" step="0.01" placeholder="$0.00"></label>
+      <label id="row-trail" class="hidden">Trail %<input id="o-trail" type="number" step="0.1" placeholder="5"></label>
+      <label id="row-tif">Time in force
+        <select id="o-tif"><option value="day">Good for day</option><option value="gtc">Good till canceled</option></select>
+      </label>
+      <label class="check" id="row-bracket"><input type="checkbox" id="o-bracket"> Add take-profit / stop-loss</label>
+      <div id="bracket-fields" class="hidden two">
+        <label>Take profit<input id="o-tp" type="number" step="0.01" placeholder="$"></label>
+        <label>Stop loss<input id="o-sl" type="number" step="0.01" placeholder="$"></label>
+      </div>
+      <div class="est">
+        <div><span id="est-px-label">Ask price</span><span id="est-px">—</span></div>
+        <div><span id="est-label">Estimated cost</span><strong id="est-total">$0.00</strong></div>
+      </div>
+      <button id="review" class="primary full">Review order</button>
+      <div class="muted small center" id="avail">—</div>
+    </div>
+    <div id="ticket-review" class="hidden">
+      <h3 id="rv-title">Review</h3>
+      <div id="rv-lines" class="review-lines"></div>
+      <p id="rv-note" class="muted small"></p>
+      <button id="submit" class="primary full">Submit order</button>
+      <button id="edit" class="ghost full">Edit</button>
+    </div>
+  </aside>
+</main>
+
+<!-- PORTFOLIO -->
+<main id="view-portfolio" class="view hidden">
   <div class="card">
-    <h2>Strategy tournament</h2>
-    <p id="champion" class="muted"></p>
-    <div class="table-wrap"><table id="standings"></table></div>
-    <div id="t-chart" class="chart"></div>
+    <div class="quote-head">
+      <div><div class="muted">Account value</div><div id="p-equity" class="big">—</div><div id="p-day"></div></div>
+      <div class="kpis" id="p-kpis"></div>
+    </div>
+    <div id="equity-chart" class="chart short"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Positions</h3></div>
+    <div class="table-wrap"><table id="positions-table"></table></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Open orders</h3><button id="cancel-all" class="ghost small">Cancel all</button></div>
+    <div class="table-wrap"><table id="open-orders"></table></div>
+  </div>
+  <div class="card">
+    <h3>Order history</h3>
+    <div class="table-wrap"><table id="order-history"></table></div>
+  </div>
+</main>
+
+<!-- BOT -->
+<main id="view-bot" class="view hidden">
+  <div class="card bot-hero">
+    <div>
+      <h2>Auto-trader</h2>
+      <button class="ghost small" data-open-lesson="bot">Learn how this works</button>
+      <div id="bot-summary" class="muted">—</div>
+    </div>
+    <div class="bot-actions live-only">
+      <label class="switch"><input type="checkbox" id="bot-enabled"><span></span><b id="bot-enabled-label">Off</b></label>
+      <select id="bot-strategy" title="Which strategy your account follows"></select>
+      <div class="seg" id="bot-mode"><button data-m="auto">Full auto</button><button data-m="approve">Approve each</button></div>
+      <button id="bot-run" class="ghost">Rebalance now</button>
+      <button id="bot-kill" class="danger">KILL SWITCH</button>
+    </div>
+  </div>
+  <div class="card hidden" id="pending-card">
+    <h3>Waiting for your approval</h3>
+    <div id="pending"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Strategy tournament</h3><button id="report-run" class="ghost small">Write report card</button></div>
+    <p id="t-champion" class="muted"></p>
+    <div class="table-wrap"><table id="t-table"></table></div>
+    <h3 class="sub">Live paper results (each started with $100k)</h3>
+    <div id="t-chart" class="chart short"></div>
     <div id="t-legend" class="legend"></div>
-    <p class="note">Each strategy trades its own fake $100,000 on live prices. Under 60 trading days, results are mostly luck.</p>
+    <p class="muted small">Every strategy trades its own fake $100,000 on live prices. Under 60 trading days, results are mostly luck.</p>
   </div>
-
   <div class="grid2">
     <div class="card">
-      <h2>Holdings</h2>
-      <div class="table-wrap"><table id="positions"></table></div>
+      <div class="card-head"><h3>10-year backtest (growth of $10k)</h3><button id="bt-run" class="ghost small">Re-run</button></div>
+      <div id="bt-chart" class="chart short"></div>
+      <div id="bt-legend" class="legend"></div>
+      <p id="bt-caveat" class="muted small"></p>
     </div>
     <div class="card">
-      <h2>Recent trades</h2>
-      <div class="table-wrap"><table id="trades"></table></div>
+      <h3>Risk limits</h3>
+      <form id="risk-form" class="risk"></form>
+      <button id="risk-save" class="primary">Save limits</button>
     </div>
   </div>
-
   <div class="card">
-    <h2>10-year backtest (growth of $10k)</h2>
-    <div id="bt-chart" class="chart"></div>
-    <div id="bt-legend" class="legend"></div>
-    <p id="bt-note" class="note"></p>
+    <div class="card-head"><h3>Today's scan</h3><button id="scan-run" class="ghost small">Scan now</button></div>
+    <div id="regime" class="muted"></div>
+    <div id="strategy-picks" class="picks"></div>
+    <h3 class="sub">Stock-by-stock signals</h3>
+    <div class="table-wrap"><table id="scan-table"></table></div>
   </div>
-
   <div class="card">
-    <h2>Bot activity</h2>
-    <div id="log" class="log"></div>
+    <h3>Bot activity</h3>
+    <div id="bot-log" class="log"></div>
   </div>
-
-  <p class="note">Read-only results page. Prices are delayed snapshots; nothing here is investment advice. Past performance doesn't guarantee future results.</p>
 </main>
-<script>
-const $ = (s) => document.querySelector(s);
-const PALETTE = { trend_momentum: "#22c38e", concentrated: "#f5b041", dual_momentum: "#4c8dff", sector_rotation: "#b07cff", dip_buyer: "#ff7eb6", spy_hold: "#8a94a3" };
-const money = (v) => v == null ? "—" : (v < 0 ? "-" : "") + "$" + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const pct = (v) => v == null || isNaN(v) ? "—" : (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
-const cls = (v) => (v >= 0 ? "up" : "down");
-const when = (t) => t ? new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const chartOpts = { autoSize: true, layout: { background: { color: "transparent" }, textColor: "#8a94a3", fontFamily: "inherit" },
-  grid: { vertLines: { visible: false }, horzLines: { color: "#1b212b" } }, rightPriceScale: { borderVisible: false },
-  timeScale: { borderVisible: false, lockVisibleTimeRangeOnResize: true } };
 
-function lines(el, curves, names, scale = 1) {
-  const chart = LightweightCharts.createChart(el, chartOpts);
-  for (const [k, pts] of Object.entries(curves)) {
-    const s = chart.addLineSeries({ color: PALETTE[k] || "#ccc", lineWidth: k === "spy_hold" ? 1 : 2, priceLineVisible: false, lastValueVisible: false });
-    s.setData(pts.filter((p, i) => i === 0 || p.time > pts[i - 1].time).map((p) => ({ time: p.time, value: p.value * scale })));
-  }
-  chart.timeScale().fitContent();
-  return Object.keys(curves).map((k) => `<span><i style="background:${PALETTE[k]}"></i>${esc(names[k] || k)}</span>`).join("");
-}
+<!-- SETTINGS -->
+<main id="view-settings" class="view hidden">
+  <div class="card">
+    <h2>Where trades go</h2>
+    <div class="brokers" id="brokers">
+      <button data-b="sim"><b>Simulator</b><span>Live prices, fake $100k. Nothing to set up.</span></button>
+      <button data-b="alpaca_paper"><b>Alpaca Paper</b><span>Real broker, fake money. Needs free account.</span></button>
+      <button data-b="alpaca_live"><b>Alpaca Live</b><span>Real money. Paper results do not predict future profits.</span></button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Connect Alpaca (one time, about 5 minutes)</h3>
+    <ol class="steps">
+      <li>Sign up at <a href="https://alpaca.markets" target="_blank" rel="noopener">alpaca.markets</a> (free).</li>
+      <li>In the Alpaca dashboard, switch to <b>Paper Trading</b> and click <b>Generate API Keys</b>.</li>
+      <li>Paste both keys below, click Save, then pick <b>Alpaca Paper</b> above.</li>
+    </ol>
+    <div class="two">
+      <label>Paper API key<input id="k-pk" placeholder="PK…" autocomplete="off"></label>
+      <label>Paper secret<input id="k-ps" type="password" autocomplete="off"></label>
+      <label>Live API key<input id="k-lk" placeholder="AK…" autocomplete="off"></label>
+      <label>Live secret<input id="k-ls" type="password" autocomplete="off"></label>
+    </div>
+    <button id="keys-save" class="primary">Save keys</button>
+    <p class="muted small">Keys are stored only on this Mac in <code>data/settings.json</code> (owner-only file).</p>
+  </div>
+  <div class="card">
+    <h3>Simulator</h3>
+    <p class="muted">Start over with a fresh fake account.</p>
+    <div class="row"><input id="reset-cash" type="number" value="100000" step="1000"><button id="reset" class="danger">Reset simulator</button></div>
+  </div>
+</main>
 
-(async function () {
-  let d;
-  try { d = await (await fetch("data.json", { cache: "no-store" })).json(); }
-  catch { $("#updated").textContent = "No results published yet."; return; }
-  const a = d.account, t = d.tournament;
-  $("#updated").textContent = "Updated " + when(d.updated);
-  $("#equity").textContent = money(a.equity);
-  $("#day").innerHTML = `<span class="${cls(a.day_pl)}">${money(a.day_pl)} (${pct(a.day_pl_pct)})</span> <span class="muted small">today</span>`;
-  $("#kpis").innerHTML = [["Total return", `<span class="${cls(a.total_pl)}">${money(a.total_pl)} (${pct(a.total_pl_pct)})</span>`],
-    ["Cash", money(a.cash)], ["Started with", money(a.starting_cash)], ["Following", esc(d.bot.strategy)], ["Bot", d.bot.enabled ? "On" : "Off"]]
-    .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
-  const eq = LightweightCharts.createChart($("#eq-chart"), chartOpts);
-  const eqs = eq.addAreaSeries({ lineColor: "#4c8dff", topColor: "#4c8dff44", bottomColor: "#4c8dff00", lineWidth: 2, priceLineVisible: false });
-  eqs.setData(d.equity_curve.filter((p, i, arr) => i === 0 || p.time > arr[i - 1].time));
-  eq.timeScale().fitContent();
-
-  const names = {};
-  t.rows.forEach((r) => (names[r.key] = r.name));
-  const champ = t.rows.find((r) => r.champion);
-  $("#champion").innerHTML = `<span class="champ">🏆 Champion: ${esc(champ?.name)}</span> · ${esc(t.reason)}`;
-  const rows = [...t.rows].sort((x, y) => y.live_return - x.live_return || y.bt_oos.sharpe - x.bt_oos.sharpe);
-  $("#standings").innerHTML = `<tr><th>Strategy</th><th class="r">Live return</th><th class="r">vs SPY</th><th class="r">Worst drop</th><th class="r">Trades</th>
-    <th class="r">Days live</th><th class="r">Backtest held-out /yr</th><th>Holding</th></tr>` +
-    rows.map((r) => `<tr><td><b style="color:${PALETTE[r.key]}">${esc(r.name)}</b>${r.champion ? ' <span class="champ">🏆</span>' : ""}<span class="about">${esc(r.about)}</span></td>
-      <td class="r ${cls(r.live_return)}">${pct(r.live_return)}</td><td class="r ${cls(r.vs_spy)}">${r.started ? (r.vs_spy >= 0 ? "+" : "") + r.vs_spy.toFixed(2) + " pts" : "—"}</td>
-      <td class="r">${r.live_max_drawdown.toFixed(1)}%</td><td class="r">${r.trades}</td><td class="r">${r.trading_days}/${t.live_days_needed}</td>
-      <td class="r">${pct(r.bt_oos.cagr)}</td><td class="muted small">${r.holdings.sort((x, y) => y.weight - x.weight).slice(0, 5).map((h) => `${h.symbol} ${h.weight.toFixed(0)}%`).join(", ") || "—"}</td></tr>`).join("");
-  const tc = {};
-  for (const [k, pts] of Object.entries(d.tournament_curves)) tc[k] = pts.map((p) => ({ time: p.time, value: p.value * 1000 }));
-  $("#t-legend").innerHTML = lines($("#t-chart"), tc, names);
-
-  $("#positions").innerHTML = d.positions.length ? `<tr><th>Symbol</th><th class="r">Value</th><th class="r">Today</th><th class="r">Total</th></tr>` +
-    d.positions.map((p) => `<tr><td><b>${esc(p.symbol)}</b></td><td class="r">${money(p.market_value)}</td><td class="r ${cls(p.day_pl_pct)}">${pct(p.day_pl_pct)}</td>
-      <td class="r ${cls(p.unrealized_pl_pct)}">${pct(p.unrealized_pl_pct)}</td></tr>`).join("") : `<tr><td class="empty">No holdings yet.</td></tr>`;
-  $("#trades").innerHTML = d.trades.length ? `<tr><th>When</th><th>Trade</th><th class="r">Price</th></tr>` +
-    d.trades.map((x) => `<tr><td class="muted">${when(x.time)}</td><td><b class="${x.side === "buy" ? "up" : "down"}">${x.side.toUpperCase()}</b> ${(+x.qty).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${esc(x.symbol)}</td>
-      <td class="r">${money(x.price)}</td></tr>`).join("") : `<tr><td class="empty">No trades yet.</td></tr>`;
-
-  const bc = {};
-  for (const [k, v] of Object.entries(d.backtest.strategies)) { bc[k] = v.curve; names[k] = v.name; }
-  $("#bt-legend").innerHTML = lines($("#bt-chart"), bc, names, 10000);
-  const dt = (x) => new Date(x * 1000).toLocaleDateString([], { month: "short", year: "numeric" });
-  $("#bt-note").textContent = `${dt(d.backtest.start)} to ${dt(d.backtest.end)}. Held-out period (never tuned on) starts ${dt(d.backtest.split)}. ${d.backtest.caveat}`;
-
-  $("#log").innerHTML = d.bot.log.length ? d.bot.log.map((l) => `<div><span class="muted">${when(l.time)}</span><span>${esc(l.msg)}</span></div>`).join("") : '<div class="muted">Nothing yet.</div>';
-})();
-</script>
+<div id="toasts"></div>
+<script src="static/app.js?v=3"></script>
+<script src="static/learn.js?v=1"></script>
 </body>
 </html>
