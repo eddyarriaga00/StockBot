@@ -69,7 +69,7 @@ def get_broker():
 
 tournament = Tournament(DATA)
 bot = Bot(DATA, get_broker, load_settings, get_champion=tournament.champion)
-publisher = Publisher(ROOT, get_broker, bot, tournament, bot.log)
+publisher = Publisher(ROOT, get_broker, bot, tournament, load_settings, bot.log)
 app = FastAPI(title="StockBot")
 
 

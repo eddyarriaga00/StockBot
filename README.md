@@ -8,6 +8,9 @@ and a connection to Alpaca for paper trading or real money.
 - Or double-click **`Run StockBot in Background.command`** once, and it runs in the background whenever you're logged in.
   (`Stop Background StockBot.command` undoes it.) Your Mac must be awake for the bot to trade.
 
+## Beginner lessons
+The **Learn** tab includes seven short lessons, retryable quizzes, saved browser progress, a searchable glossary, and a fictional-price practice calculator. Lessons never place orders, change your broker, or enable the bot. Progress is local to this browser and is separate from your trading data.
+
 ## Screens
 - **Trade**: search, watchlist, live charts (1D to MAX, line or candles), key stats, news, and an order ticket
   (market / limit / stop / stop-limit / trailing stop, shares or dollars, day or GTC, take-profit / stop-loss) with a review step.

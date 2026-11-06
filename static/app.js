@@ -21,7 +21,44 @@ const state = {
 function localGet(k) { try { return localStorage.getItem("sb:" + k); } catch { return null; } }
 function localSet(k, v) { try { localStorage.setItem("sb:" + k, v); } catch {} }
 
+// On the public GitHub Pages site there is no server: the app reads the snapshot the bot publishes
+// (docs/data/) and every control that would change something is turned off.
+const SNAPSHOT = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || new URLSearchParams(location.search).has("viewonly");
+const SNAPSHOT_RANGES = ["1d", "5d", "1mo", "1y", "5y"];
+let core = null;
+const symFiles = {};
+
+async function snapshotApi(path, opts) {
+  if ((opts.method || "GET") !== "GET") throw new Error("This is the view-only website. Trading and bot controls live in the StockBot app on its home computer.");
+  if (!core) core = await fetch("data/core.json", { cache: "no-store" }).then((r) => r.json());
+  const url = new URL(path, location.origin);
+  const [route, arg] = url.pathname.replace(/^\/api\//, "").split(/\/(?=[^/]+$)/);
+  const q = (k) => url.searchParams.get(k);
+  const sym = (s) => (symFiles[s] ??= fetch(`data/sym/${encodeURIComponent(s)}.json`, { cache: "no-store" })
+    .then((r) => { if (!r.ok) throw new Error(`${s} isn't on the published watchlist.`); return r.json(); }));
+  const fixed = { account: core.account, equity: core.equity, watchlist: core.watchlist, clock: core.clock, bot: core.bot,
+    tournament: core.tournament, settings: core.settings, strategies: core.strategies, "bot/backtest": core.backtest };
+  const full = arg ? `${route}/${arg}` : route;
+  if (full in fixed) return fixed[full];
+  if (full === "tournament/curves") return core.tournament_curves;
+  if (full === "orders") return core.orders[q("status") || "all"] || [];
+  if (full === "quotes") return Object.fromEntries((q("symbols") || "").split(",").filter((s) => core.quotes[s]).map((s) => [s, core.quotes[s]]));
+  if (full === "search") {
+    const t = (q("q") || "").toLowerCase();
+    return core.symbols.filter((x) => x.symbol.toLowerCase().startsWith(t) || x.name.toLowerCase().includes(t)).slice(0, 8);
+  }
+  if (route === "quote") return core.quotes[arg] || (await sym(arg)).quote;
+  if (route === "news") return (await sym(arg)).news || [];
+  if (route === "history") {
+    const h = (await sym(arg)).history[q("range")];
+    if (!h) throw new Error("That chart range isn't published.");
+    return { gmtoffset: h.gmtoffset, candles: h.c.map(([time, open, high, low, close, volume]) => ({ time, open, high, low, close, volume })) };
+  }
+  throw new Error("Not available on the view-only website.");
+}
+
 async function api(path, opts = {}) {
+  if (SNAPSHOT) return snapshotApi(path, opts);
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...opts,
@@ -88,8 +125,32 @@ async function loadChart() {
   volSeries = priceChart.addHistogramSeries({ priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
   priceChart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
   volSeries.setData(c.map((x) => ({ time: x.time, value: x.volume, color: x.close >= x.open ? "#22c38e33" : "#f2555a33" })));
+  addTradeMarkers(sym, c, shift);
   priceChart.timeScale().fitContent();
   requestAnimationFrame(() => priceChart.timeScale().fitContent());
+}
+
+// Arrows on the chart where the account bought (▲) or sold (▼) this stock.
+let fillsCache = { time: 0, orders: [] };
+async function addTradeMarkers(sym, candles, shift) {
+  if (!candles.length) return;
+  if (Date.now() - fillsCache.time > 30000) {
+    fillsCache = { time: Date.now(), orders: await api("/api/orders?status=closed").catch(() => []) };
+  }
+  const series = mainSeries;
+  const markers = [];
+  for (const o of fillsCache.orders) {
+    if (o.symbol !== sym || o.status !== "filled" || !o.filled_at) continue;
+    const t = o.filled_at + shift;
+    if (t < candles[0].time) continue;
+    let bar = candles[0].time;
+    for (const x of candles) { if (x.time <= t) bar = x.time; else break; }
+    const buy = o.side === "buy";
+    markers.push({ time: bar, position: buy ? "belowBar" : "aboveBar", color: buy ? "#22c38e" : "#f2555a",
+      shape: buy ? "arrowUp" : "arrowDown", text: `${buy ? "Buy" : "Sell"} ${(+o.filled_qty).toLocaleString(undefined, { maximumFractionDigits: 2 })}${o.source === "bot" ? " · bot" : ""}` });
+  }
+  markers.sort((a, b) => a.time - b.time);
+  if (series === mainSeries) series.setMarkers(markers);
 }
 
 // ---------- quote panel ----------
@@ -122,7 +183,7 @@ async function refreshQuote() {
   $("#q-exchange").textContent = q.exchange || "";
   $("#q-price").textContent = money(q.price);
   $("#q-change").innerHTML = `<span class="${cls(q.change)}">${signed(q.change)} (${pct(q.change_pct)})</span> <span class="muted small">Today</span>`;
-  $("#q-session").textContent = q.market_open ? "Market open · live" : "Market closed · last price";
+  $("#q-session").textContent = SNAPSHOT ? "Price as of the last website update" : q.market_open ? "Market open · live" : "Market closed · last price";
   const stats = [
     ["Open", money(q.open)], ["High", money(q.high)], ["Low", money(q.low)], ["Prev close", money(q.prev_close)],
     ["Bid", money(q.bid)], ["Ask", money(q.ask)], ["Volume", big(q.volume)],
@@ -665,6 +726,12 @@ async function refreshClock() {
   const c = await api("/api/clock").catch(() => null);
   if (!c) return;
   const pill = $("#market-pill");
+  if (SNAPSHOT) {
+    const age = (Date.now() / 1000 - core.updated) / 60;
+    pill.textContent = `Updated ${age < 60 ? Math.max(1, Math.round(age)) + " min ago" : when(core.updated)}`;
+    $("#snapshot-updated").textContent = when(core.updated);
+    return;
+  }
   pill.classList.toggle("open", c.is_open);
   const t = (x) => new Date(x * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   pill.textContent = c.is_open ? `Market open · closes ${t(c.session_end)}` : "Market closed";
@@ -672,6 +739,12 @@ async function refreshClock() {
 
 // ---------- boot ----------
 (async function boot() {
+  if (SNAPSHOT) {
+    document.body.classList.add("snapshot");
+    $$("#ranges button").forEach((b) => { if (!SNAPSHOT_RANGES.includes(b.dataset.r)) b.remove(); });
+    // Pick up newly published results without a reload.
+    setInterval(() => { core = null; for (const k in symFiles) delete symFiles[k]; fillsCache.time = 0; }, 5 * 60000);
+  }
   await Promise.all([refreshSettings(), refreshAccount(), refreshBot(), refreshClock()]);
   await refreshWatchlist();
   selectSymbol(state.symbol);

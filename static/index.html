@@ -4,8 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StockBot</title>
-  <link rel="stylesheet" href="/static/style.css?v=2">
-  <script src="/static/vendor/lightweight-charts.js"></script>
+  <meta name="description" content="StockBot: a trading bot that runs a live tournament of strategies on fake money. Watch its trades, charts, and results.">
+  <link rel="stylesheet" href="static/style.css?v=3">
+  <script src="static/vendor/lightweight-charts.js"></script>
 </head>
 <body>
 <header class="topbar">
@@ -15,25 +16,34 @@
     <div id="search-results" class="dropdown hidden"></div>
   </div>
   <nav>
+    <button data-view="learn">Learn</button>
     <button data-view="trade" class="active">Trade</button>
     <button data-view="portfolio">Portfolio</button>
     <button data-view="bot">Bot</button>
-    <button data-view="settings">Settings</button>
+    <button data-view="settings" class="live-only">Settings</button>
   </nav>
   <div class="status">
     <span id="broker-badge" class="badge">SIMULATOR</span>
     <span id="market-pill" class="pill">—</span>
   </div>
 </header>
+<div class="snapshot-banner snapshot-only">
+  <b>Live view of StockBot.</b> The bot trades fake money on real prices from its home computer; this site shows what it's doing
+  (last update <span id="snapshot-updated">—</span>). Buttons that would trade are turned off here.
+  <a href="https://github.com/eddyarriaga00/StockBot" target="_blank" rel="noopener">Get the code</a>
+</div>
+
+<main id="view-learn" class="view hidden"></main>
 
 <!-- TRADE -->
 <main id="view-trade" class="view trade">
   <aside class="watchlist card">
-    <div class="card-head"><h3>Watchlist</h3><button id="wl-toggle" class="ghost small" title="Add/remove current symbol">＋</button></div>
+    <div class="card-head"><h3>Watchlist</h3><button id="wl-toggle" class="ghost small live-only" title="Add/remove current symbol">＋</button></div>
     <div id="watchlist"></div>
   </aside>
 
   <section class="center">
+    <div class="card beginner-invite"><div><b>New to stocks? Start here.</b><p class="muted">Learn the basics in seven bite-sized lessons, then practice with fictional prices.</p></div><button class="primary" data-open-lesson="ownership">Start learning →</button></div>
     <div class="card">
       <div class="quote-head">
         <div>
@@ -73,6 +83,12 @@
   </section>
 
   <aside class="ticket card" id="ticket">
+    <div class="snapshot-only ticket-note">
+      <h3>Trading is off on this website</h3>
+      <p class="muted">This is the public view of StockBot. Orders are placed by the bot (or its owner) in the StockBot app on its home computer, using fake money.</p>
+      <p class="muted">The arrows on the chart show where the account bought ▲ and sold ▼.</p>
+      <a class="ghost full btn-link" href="https://github.com/eddyarriaga00/StockBot#start-it" target="_blank" rel="noopener">Run your own StockBot</a>
+    </div>
     <div class="seg full" id="side">
       <button data-side="buy" class="active buy">Buy</button><button data-side="sell" class="sell">Sell</button>
     </div>
@@ -86,6 +102,8 @@
           <option value="trailing_stop">Trailing stop</option>
         </select>
       </label>
+      <p id="order-help" class="muted small"></p>
+      <button class="ghost small" data-open-lesson="orders">Explain order types</button>
       <label id="row-unit">Buy in
         <select id="o-unit"><option value="shares">Shares</option><option value="dollars">Dollars</option></select>
       </label>
@@ -148,9 +166,10 @@
   <div class="card bot-hero">
     <div>
       <h2>Auto-trader</h2>
+      <button class="ghost small" data-open-lesson="bot">Learn how this works</button>
       <div id="bot-summary" class="muted">—</div>
     </div>
-    <div class="bot-actions">
+    <div class="bot-actions live-only">
       <label class="switch"><input type="checkbox" id="bot-enabled"><span></span><b id="bot-enabled-label">Off</b></label>
       <select id="bot-strategy" title="Which strategy your account follows"></select>
       <div class="seg" id="bot-mode"><button data-m="auto">Full auto</button><button data-m="approve">Approve each</button></div>
@@ -204,7 +223,7 @@
     <div class="brokers" id="brokers">
       <button data-b="sim"><b>Simulator</b><span>Live prices, fake $100k. Nothing to set up.</span></button>
       <button data-b="alpaca_paper"><b>Alpaca Paper</b><span>Real broker, fake money. Needs free account.</span></button>
-      <button data-b="alpaca_live"><b>Alpaca Live</b><span>Real money. Only after paper results look good.</span></button>
+      <button data-b="alpaca_live"><b>Alpaca Live</b><span>Real money. Paper results do not predict future profits.</span></button>
     </div>
   </div>
   <div class="card">
@@ -231,6 +250,7 @@
 </main>
 
 <div id="toasts"></div>
-<script src="/static/app.js?v=2"></script>
+<script src="static/app.js?v=3"></script>
+<script src="static/learn.js?v=1"></script>
 </body>
 </html>

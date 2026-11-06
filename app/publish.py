@@ -1,22 +1,31 @@
-"""Publishes a read-only snapshot of results to docs/data.json and pushes it to GitHub, where GitHub Pages
-serves the public report card. Contains only fake-money results: no keys, no settings, no way to trade."""
+"""Publishes the StockBot app to GitHub Pages as a view-only mirror.
+
+It copies the real front end (static/) into docs/ and writes the data its screens need into docs/data/:
+core.json for the account, orders, bot and tournament, plus one file per symbol with quotes, charts and news.
+On Pages the app reads those files instead of the API and turns off every trading control.
+Only fake-money results are published: no keys, no settings, no way to place orders.
+"""
 import json
 import os
+import shutil
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 
-from . import strategy
+from . import market, strategy
 
 PUBLISH_EVERY_OPEN = 2 * 3600   # while the market is open
+RANGES = ["1d", "5d", "1mo", "1y", "5y"]
 DOCS = "docs"
 
 
 class Publisher:
-    def __init__(self, root, get_broker, bot, tournament, log):
+    def __init__(self, root, get_broker, bot, tournament, load_settings, log):
         self.root = root
         self.get_broker = get_broker
         self.bot = bot
         self.tournament = tournament
+        self.load_settings = load_settings
         self.log = log
         self.path = os.path.join(root, "data", "publish.json")
         self.state = {"last": 0, "last_close": None}
@@ -24,50 +33,91 @@ class Publisher:
             with open(self.path) as f:
                 self.state.update(json.load(f))
 
-    def snapshot(self):
+    # ---------- build ----------
+    def build(self):
+        docs = os.path.join(self.root, DOCS)
         broker = self.get_broker()
-        acct = broker.account()
-        bt = strategy.backtest_all()
-        trades = [
-            {"time": o["filled_at"] or o["created_at"], "symbol": o["symbol"], "side": o["side"], "qty": o["filled_qty"],
-             "price": o["filled_avg_price"], "source": o.get("source"), "reason": o.get("reason")}
-            for o in broker.orders("closed", 100) if o["status"] == "filled"
-        ][:40]
-        return {
+        tourney = self.tournament.standings()
+        positions = broker.positions()
+        closed = broker.orders("closed", 500)
+        open_ = broker.orders("open")
+        watchlist = self.load_settings()["watchlist"]
+        symbols = list(dict.fromkeys(
+            watchlist + [p["symbol"] for p in positions] + [o["symbol"] for o in closed if o["status"] == "filled"]
+            + [h["symbol"] for r in tourney["rows"] for h in r["holdings"]] + strategy.STOCKS))
+        quotes = market.quotes(symbols)
+        symbols = [s for s in symbols if s in quotes]
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            sym_data = dict(zip(symbols, pool.map(self._symbol_file, symbols, [quotes[s] for s in symbols])))
+
+        bot_status = self.bot.status()
+        bot_status["pending"] = []
+        core = {
             "updated": time.time(),
-            "broker": broker.name,
-            "account": {k: acct[k] for k in ("equity", "cash", "day_pl", "day_pl_pct", "total_pl", "total_pl_pct", "starting_cash")},
-            "positions": [{k: p[k] for k in ("symbol", "qty", "price", "market_value", "unrealized_pl_pct", "day_pl_pct")}
-                          for p in broker.positions()],
-            "equity_curve": [{"time": int(h["time"]), "value": h["equity"]} for h in broker.equity_history()][-2000:],
-            "bot": {"strategy": self.bot.status()["strategy_name"],
-                    "enabled": self.bot.cfg["enabled"], "log": [l for l in self.bot.state["log"] if l["kind"] in ("trade", "warn", "info")][:30]},
-            "trades": trades,
-            "tournament": self.tournament.standings(),
+            "account": {"account": broker.account(), "positions": positions},
+            "equity": broker.equity_history()[-3000:],
+            "orders": {"open": open_, "closed": closed, "all": open_ + closed},
+            "watchlist": watchlist,
+            "quotes": quotes,
+            "clock": market.market_clock(),
+            "bot": bot_status,
+            "tournament": tourney,
             "tournament_curves": self.tournament.live_curves(),
-            "backtest": {"start": bt["start"], "split": bt["split"], "end": bt["end"], "caveat": bt["caveat"],
-                         "strategies": {k: {"name": v["name"], "oos": v["oos"], "full": v["full"], "curve": v["curve"]}
-                                        for k, v in bt["strategies"].items()}},
+            "backtest": strategy.backtest_all(),
+            "settings": {"broker": broker.name},
+            "strategies": {k: {"name": v["name"], "about": v["about"]} for k, v in strategy.STRATEGIES.items()},
+            "symbols": [{"symbol": s, "name": quotes[s]["name"], "exchange": quotes[s]["exchange"], "type": quotes[s]["type"]} for s in symbols],
         }
 
+        # Rebuild docs/ from scratch so removed files don't linger.
+        for name in ("static", "data", "index.html", "data.json", "vendor"):
+            p = os.path.join(docs, name)
+            if os.path.isdir(p):
+                shutil.rmtree(p)
+            elif os.path.exists(p):
+                os.remove(p)
+        os.makedirs(os.path.join(docs, "data", "sym"), exist_ok=True)
+        static = os.path.join(self.root, "static")
+        shutil.copytree(static, os.path.join(docs, "static"), ignore=shutil.ignore_patterns("index.html"))
+        shutil.copy(os.path.join(static, "index.html"), os.path.join(docs, "index.html"))
+        open(os.path.join(docs, ".nojekyll"), "w").close()
+        _write(os.path.join(docs, "data", "core.json"), core)
+        for s, d in sym_data.items():
+            _write(os.path.join(docs, "data", "sym", f"{s}.json"), d)
+        return len(symbols)
+
+    def _symbol_file(self, symbol, quote):
+        history = {}
+        for rng in RANGES:
+            try:
+                h = market.history(symbol, rng)
+            except market.MarketDataError:
+                continue
+            history[rng] = {"gmtoffset": h["gmtoffset"],
+                            "c": [[c["time"], round(c["open"], 2), round(c["high"], 2), round(c["low"], 2), round(c["close"], 2), c["volume"]]
+                                  for c in h["candles"]]}
+        try:
+            news = market.news(symbol)
+        except market.MarketDataError:
+            news = []
+        return {"quote": quote, "history": history, "news": news}
+
+    # ---------- publish ----------
     def publish(self, push=True):
-        os.makedirs(os.path.join(self.root, DOCS), exist_ok=True)
-        out = os.path.join(self.root, DOCS, "data.json")
-        with open(out, "w") as f:
-            json.dump(self.snapshot(), f, separators=(",", ":"))
+        n = self.build()
         self.state["last"] = time.time()
         self._save()
         if not push:
-            return "written"
-        msg = time.strftime("Report card update %Y-%m-%d %H:%M")
-        cmds = [["git", "add", f"{DOCS}/data.json"], ["git", "commit", "-q", "-m", msg, "--", f"{DOCS}/data.json"],
-                ["git", "push", "-q", "origin", "HEAD"]]
+            return f"built ({n} symbols)"
+        msg = time.strftime("Website update %Y-%m-%d %H:%M")
+        cmds = [["git", "add", "-A", DOCS], ["git", "commit", "-q", "-m", msg, "--", DOCS], ["git", "push", "-q", "origin", "HEAD"]]
         for c in cmds:
-            r = subprocess.run(c, cwd=self.root, capture_output=True, text=True, timeout=120)
+            r = subprocess.run(c, cwd=self.root, capture_output=True, text=True, timeout=180)
             if r.returncode and not (c[1] == "commit" and "nothing" in (r.stdout + r.stderr)):
                 self.log(f"Publishing to GitHub failed at '{' '.join(c[:2])}': {(r.stderr or r.stdout).strip()[:200]}", "error")
                 return "failed"
-        self.log("Report card published to GitHub Pages.", "info")
+        self.log(f"Website updated on GitHub Pages ({n} symbols).", "info")
         return "pushed"
 
     def step(self, clock):
@@ -83,3 +133,8 @@ class Publisher:
     def _save(self):
         with open(self.path, "w") as f:
             json.dump(self.state, f)
+
+
+def _write(path, obj):
+    with open(path, "w") as f:
+        json.dump(obj, f, separators=(",", ":"))
