@@ -254,3 +254,17 @@ body.snapshot #risk-form { pointer-events: none; opacity: .8; }
 .ticket-note h3 { margin-bottom: 8px; }
 .ticket-note p { margin: 0 0 10px; line-height: 1.5; }
 .btn-link { display: block; text-align: center; text-decoration: none; margin-top: 6px; }
+
+/* website remote control */
+body:not(.remote) .remote-only { display: none !important; }
+body.remote .local-only { display: none !important; }
+.remote-login { display: flex; gap: 8px; margin: 8px 0; max-width: 520px; }
+.remote-login input { flex: 1; text-transform: uppercase; letter-spacing: .05em; }
+.remote-login button { white-space: nowrap; }
+.remote-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 20px;
+  background: rgba(34,195,142,.12); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.remote-banner b { color: var(--up); }
+.remote-actions { flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.remote-actions .switch { margin-right: 8px; }
+#remote-info code { font-size: 15px; letter-spacing: .06em; }
+@media (max-width: 760px) { .remote-login { flex-direction: column; } }

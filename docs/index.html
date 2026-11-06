@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StockBot</title>
   <meta name="description" content="StockBot: a trading bot that runs a live tournament of strategies on fake money. Watch its trades, charts, and results.">
-  <link rel="stylesheet" href="static/style.css?v=3">
+  <link rel="stylesheet" href="static/style.css?v=4">
   <script src="static/vendor/lightweight-charts.js"></script>
 </head>
 <body>
@@ -28,9 +28,17 @@
   </div>
 </header>
 <div class="snapshot-banner snapshot-only">
-  <b>Live view of StockBot.</b> The bot trades fake money on real prices from its home computer; this site shows what it's doing
-  (last update <span id="snapshot-updated">—</span>). Buttons that would trade are turned off here.
+  <b>Live view of StockBot.</b> The bot trades fake money on real prices from its home computer
+  (last update <span id="snapshot-updated">—</span>). <span id="remote-status">Checking whether the StockBot computer is online…</span>
+  <form id="remote-login" class="remote-login hidden">
+    <input id="remote-passcode" placeholder="Passcode, e.g. ABCD-EFGH-JKLM" autocomplete="current-password" autocapitalize="characters">
+    <button class="primary">Unlock full control</button>
+  </form>
   <a href="https://github.com/eddyarriaga00/StockBot" target="_blank" rel="noopener">Get the code</a>
+</div>
+<div class="remote-banner remote-only">
+  <span><b>● Connected to your StockBot.</b> Everything here works just like on the Mac: trades, bot, and settings.</span>
+  <button class="ghost small" id="remote-logout">Log out</button>
 </div>
 
 <main id="view-learn" class="view hidden"></main>
@@ -242,6 +250,17 @@
     <button id="keys-save" class="primary">Save keys</button>
     <p class="muted small">Keys are stored only on this Mac in <code>data/settings.json</code> (owner-only file).</p>
   </div>
+  <div class="card local-only" id="remote-card">
+    <h3>Control from the website</h3>
+    <p class="muted">Open <a href="https://eddyarriaga00.github.io/StockBot/" target="_blank" rel="noopener">eddyarriaga00.github.io/StockBot</a> on any device and enter this passcode to trade and run the bot from there. Works while this Mac is on and StockBot is running.</p>
+    <div id="remote-info" class="kpis"></div>
+    <div class="row remote-actions">
+      <label class="switch"><input type="checkbox" id="remote-enabled"><span></span><b>Allow website control</b></label>
+      <button id="remote-reveal" class="ghost">Show passcode</button>
+      <button id="remote-new" class="ghost">New passcode</button>
+      <button id="remote-revoke" class="danger">Sign out all devices</button>
+    </div>
+  </div>
   <div class="card">
     <h3>Simulator</h3>
     <p class="muted">Start over with a fresh fake account.</p>
@@ -250,7 +269,7 @@
 </main>
 
 <div id="toasts"></div>
-<script src="static/app.js?v=3"></script>
+<script src="static/app.js?v=4"></script>
 <script src="static/learn.js?v=1"></script>
 </body>
 </html>
