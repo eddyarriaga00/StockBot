@@ -38,7 +38,7 @@ Your account follows the **champion** (or a strategy you pick):
 - After that, the champion is the best live paper performer whose worst drop isn't much worse than SPY's.
 - The champion is reviewed at most weekly. A report card is written to `data/reports/` every Friday after the close.
 
-Risk limits on your account: max % per stock, cash reserve, trailing stops, a daily loss halt, and a kill switch.
+Risk limits on your account: max % per stock, cash reserve, a daily loss halt, and a kill switch. Automatic trailing stops are off by default: in 10-year backtests they sold winners on normal dips and lowered every strategy's return (Momentum Weekly 22% → 17%/yr). Set "Trailing stop" above 0 in Settings to turn them back on.
 
 No strategy is guaranteed to make money. Backtests overstate results (they test today's winners), so
 let the paper tournament run for a few months before trusting any of it with real money.

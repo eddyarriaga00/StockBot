@@ -19,7 +19,7 @@ DEFAULT_BOT = {
     "max_position_pct": 25.0,    # hard cap on any single stock, % of the bot's money
     "budget_pct": 100.0,         # % of account equity the bot may manage
     "cash_reserve_pct": 2.0,
-    "stop_atr": 3.0,             # trailing stop distance in ATRs (average daily ranges)
+    "stop_atr": 0.0,             # trailing stop distance in ATRs; 0 = off (backtests: stops cut every strategy's return)
     "daily_loss_limit_pct": 3.0, # halt trading for the day if the account falls this much
 }
 
@@ -182,15 +182,17 @@ class Bot:
         self.execute(orders)
 
     def check_stops(self):
-        """Trailing stop per stock: exit if price falls stop_atr x ATR below its highest level since entry."""
+        """Trailing stop per stock: exit if price falls stop_atr x ATR below its highest level since entry.
+        Off by default: in 10-year backtests stops sold winners on normal dips and lowered every strategy's return."""
         broker = self.get_broker()
+        stops_on = self.cfg["stop_atr"] > 0
         positions = {p["symbol"]: p for p in broker.positions()}
         with self.lock:
             for s in list(self.state["owned"]):  # forget positions that were sold elsewhere
                 if s not in positions and time.time() - self.state["owned"][s]["since"] > 600:
                     self.state["owned"].pop(s)
         for s, info in list(self.state["owned"].items()):
-            if s not in positions or s in strategy.ETFS:
+            if not stops_on or s not in positions or s in strategy.ETFS:
                 continue
             candles = strategy._safe_daily(s)
             a = strategy.atr(candles) if candles else None

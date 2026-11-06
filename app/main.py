@@ -42,6 +42,12 @@ def load_settings():
         s = json.load(f)
     if "strategy" not in s.get("bot", {}):  # settings from before the strategy tournament
         s.setdefault("bot", {}).update(strategy="auto", max_position_pct=DEFAULT_BOT["max_position_pct"])
+    b = s.setdefault("bot", {})
+    if not b.get("stops_reviewed"):  # one-time: stops were on by default but backtests show they cost money
+        if b.get("stop_atr") == 3.0:
+            b["stop_atr"] = 0.0
+        b["stops_reviewed"] = True
+        save_settings({**DEFAULT_SETTINGS, **s})
     return {**DEFAULT_SETTINGS, **s, "bot": {**DEFAULT_BOT, **s.get("bot", {})}}
 
 
@@ -314,7 +320,7 @@ def api_save_settings(body: dict = Body(...)):
         if body.get(k):
             s[k] = body[k].strip()
     if "bot" in body:
-        s["bot"] = {**s["bot"], **{k: v for k, v in body["bot"].items() if k in DEFAULT_BOT}}
+        s["bot"] = {**s["bot"], **{k: v for k, v in body["bot"].items() if k in DEFAULT_BOT or k == "stops_reviewed"}}
     if "broker" in body and body["broker"] != s["broker"]:
         target = body["broker"]
         if target not in ("sim", "alpaca_paper", "alpaca_live"):
