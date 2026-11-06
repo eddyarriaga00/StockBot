@@ -555,7 +555,7 @@ $("#cancel-all").addEventListener("click", async () => {
 });
 
 // ---------- bot ----------
-const PALETTE = { trend_momentum: "#22c38e", concentrated: "#f5b041", dual_momentum: "#4c8dff", sector_rotation: "#b07cff", dip_buyer: "#ff7eb6", spy_hold: "#8a94a3" };
+const PALETTE = { momentum_max: "#ff5c5c", momentum_weekly: "#00d1d1", nasdaq_2x: "#c8e64c", trend_momentum: "#22c38e", concentrated: "#f5b041", dual_momentum: "#4c8dff", sector_rotation: "#b07cff", dip_buyer: "#ff7eb6", spy_hold: "#8a94a3" };
 const lineChart = (el) => LightweightCharts.createChart(el, { ...chartOpts(), timeScale: { borderVisible: false, timeVisible: false, lockVisibleTimeRangeOnResize: true } });
 const btChart = lineChart($("#bt-chart"));
 const tChart = lineChart($("#t-chart"));

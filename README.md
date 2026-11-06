@@ -29,7 +29,7 @@ The **Learn** tab includes seven short lessons, retryable quizzes, saved browser
 
 ## How the bot decides: a strategy tournament
 Six strategies each trade their own fake $100,000 on live prices, side by side:
-Trend Momentum, Concentrated Momentum, Dual Momentum, Sector Rotation, Dip Buyer, and Hold SPY (the baseline to beat).
+Momentum Max, Momentum Weekly, Nasdaq 2x Trend, Trend Momentum, Concentrated Momentum, Dual Momentum, Sector Rotation, Dip Buyer, and Hold SPY (the baseline to beat). Momentum Max and Momentum Weekly rank stocks on blended 3/6/12-month risk-adjusted momentum, check every week, and keep current winners unless something is clearly stronger.
 The same code runs the 10-year backtest and the live trading, so there's no gap between what was tested and what trades.
 
 Your account follows the **champion** (or a strategy you pick):

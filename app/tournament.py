@@ -36,6 +36,10 @@ class Tournament:
             broker = SimBroker(os.path.join(self.dir, f"{key}.db"))
             self.entries[key] = {"broker": broker,
                                  "bot": Bot(self.dir, (lambda b=broker: b), state_name=f"{key}.json", strategy_key=key)}
+        # New or removed strategies: pick the champion again right away instead of waiting for the weekly review.
+        if sorted(self.entries) != sorted(self.state.get("keys", [])):
+            self.state["keys"] = sorted(self.entries)
+            self.state["reviewed"] = 0
 
     def save(self):
         with self.lock:

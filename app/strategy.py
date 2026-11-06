@@ -9,6 +9,10 @@ Strategies (all well-known, published styles, not secret edges):
 - dual_momentum:    100% in whichever of US large/tech/small/intl/emerging is strongest, or bonds if none beat T-bills.
 - sector_rotation:  the 3 strongest sector ETFs that are above their 200-day avg.
 - dip_buyer:        buys short, sharp pullbacks (2-day RSI < 10) in uptrending stocks, sells on the bounce.
+- momentum_weekly:  6 stocks with the best blended 3/6/12-month risk-adjusted momentum, checked every week,
+                    with a "keep what's working" bonus so it doesn't churn. T-bills when SPY < 200-day.
+- momentum_max:     same engine, only the top 4. Highest backtested return, bigger single-stock risk.
+- nasdaq_2x:        2x Nasdaq-100 (QLD) while the Nasdaq is above its 200-day avg and calm, T-bills otherwise.
 - spy_hold:         just hold SPY. The baseline every other strategy has to beat.
 """
 import math
@@ -25,8 +29,9 @@ STOCKS = [
 SECTORS = ["XLK", "XLE", "XLV", "XLF", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE", "XLC"]
 ASSET_CLASSES = ["SPY", "QQQ", "IWM", "EFA", "EEM"]
 BENCHMARK, SAFE, BONDS = "SPY", "BIL", "IEF"
-ETFS = set(SECTORS + ASSET_CLASSES + [SAFE, BONDS, "GLD", "TLT"])
-ALL_SYMBOLS = list(dict.fromkeys(STOCKS + SECTORS + ASSET_CLASSES + [SAFE, BONDS]))
+NASDAQ, NASDAQ_2X = "QQQ", "QLD"
+ETFS = set(SECTORS + ASSET_CLASSES + [SAFE, BONDS, "GLD", "TLT", NASDAQ_2X])
+ALL_SYMBOLS = list(dict.fromkeys(STOCKS + SECTORS + ASSET_CLASSES + [SAFE, BONDS, NASDAQ_2X]))
 # Kept for older imports.
 UNIVERSE = STOCKS
 
@@ -211,6 +216,53 @@ def dip_buyer(ctx, i, holdings):
     return weights, notes
 
 
+def _blended_momentum(ctx, s, i):
+    """Risk-adjusted momentum blended over 3, 6 and 12 months, skipping the last week (short-term noise)."""
+    rs = [ctx.ret(s, i, n, skip=5) for n in (63, 126, 252)]
+    v = ctx.vol(s, i)
+    if None in rs or v is None:
+        return None, None
+    return (0.2 * rs[0] + 0.4 * rs[1] + 0.4 * rs[2]) / v, rs
+
+
+def _momentum_top(ctx, i, holdings, n):
+    if not ctx.risk_on(i):
+        return {SAFE: 1.0}, {SAFE: "SPY below its 200-day average: risk-off, holding T-bills"}
+    scored = []
+    for s in STOCKS:
+        p, s200 = ctx.px(s, i), ctx.sma(s, i, 200)
+        score, rs = _blended_momentum(ctx, s, i)
+        if None in (p, s200, score) or p < s200:
+            continue
+        # Stocks we already own get a 25% bonus: only swap when something is clearly stronger (less churn).
+        scored.append((score * (1.25 if s in holdings else 1.0), s, rs))
+    scored.sort(reverse=True)
+    top = scored[:n]
+    notes = {s: f"Momentum 3/6/12-mo {rs[0] * 100:+.0f}% / {rs[1] * 100:+.0f}% / {rs[2] * 100:+.0f}%"
+             + (" (kept)" if s in holdings else "") for _, s, rs in top}
+    return {s: 1 / n for _, s, _ in top}, notes
+
+
+def momentum_weekly(ctx, i, holdings):
+    return _momentum_top(ctx, i, holdings, 6)
+
+
+def momentum_max(ctx, i, holdings):
+    return _momentum_top(ctx, i, holdings, 4)
+
+
+def nasdaq_2x(ctx, i, holdings):
+    p, s200, v = ctx.px(NASDAQ, i), ctx.sma(NASDAQ, i, 200), ctx.vol(NASDAQ, i, 21)
+    if None in (p, s200, v) or not ctx.has(NASDAQ_2X, i):
+        return {SAFE: 1.0}, {SAFE: "Not enough Nasdaq data"}
+    # 2% band around the 200-day so it doesn't flip in and out on small wiggles.
+    on = p > s200 * (0.98 if NASDAQ_2X in holdings else 1.02)
+    if on and v < 0.35:
+        return {NASDAQ_2X: 1.0}, {NASDAQ_2X: f"Nasdaq {p / s200 * 100 - 100:+.1f}% vs 200-day, volatility {v * 100:.0f}%"}
+    why = "Nasdaq below its 200-day average" if not on else f"Nasdaq too volatile ({v * 100:.0f}%)"
+    return {SAFE: 1.0}, {SAFE: why + ": holding T-bills"}
+
+
 def spy_hold(ctx, i, holdings):
     return {BENCHMARK: 1.0}, {BENCHMARK: "Baseline: buy and hold the S&P 500"}
 
@@ -226,6 +278,12 @@ STRATEGIES = {
                         "about": "Three strongest sector ETFs above their 200-day average."},
     "dip_buyer": {"name": "Dip Buyer", "fn": dip_buyer, "rebalance_days": 1, "fill_spy": True, "max_w": 0.10,
                   "about": "Buys sharp 2-day pullbacks in uptrending stocks, sells on the bounce. Rest in SPY."},
+    "momentum_weekly": {"name": "Momentum Weekly", "fn": momentum_weekly, "rebalance_days": 5, "fill_spy": False, "max_w": 0.17,
+                        "about": "6 stocks with the best 3/6/12-month momentum, checked weekly, keeps winners. T-bills when SPY < 200-day."},
+    "momentum_max": {"name": "Momentum Max", "fn": momentum_max, "rebalance_days": 5, "fill_spy": False, "max_w": 0.25,
+                     "about": "Top 4 momentum stocks, checked weekly. Highest backtested return; each stock is 25% of the account."},
+    "nasdaq_2x": {"name": "Nasdaq 2x Trend", "fn": nasdaq_2x, "rebalance_days": 5, "fill_spy": False, "max_w": 1.0,
+                  "about": "2x Nasdaq-100 (QLD) while the Nasdaq is above its 200-day and calm; T-bills otherwise. High risk."},
     "spy_hold": {"name": "Hold SPY (baseline)", "fn": spy_hold, "rebalance_days": 63, "fill_spy": False, "max_w": 1.0,
                  "about": "Buy and hold the S&P 500. Every strategy must beat this to be worth it."},
 }
