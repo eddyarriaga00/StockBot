@@ -1,6 +1,9 @@
 """StockBot web server: serves the trading app and its API on http://127.0.0.1:8777."""
 import json
 import os
+import shutil
+import subprocess
+import sys
 import threading
 import time
 
@@ -133,8 +136,16 @@ def _err(e):
     raise HTTPException(status_code=400, detail=str(e))
 
 
+def _stay_awake():
+    """Keep the Mac from idle-sleeping while StockBot runs, or the bot misses the market.
+    Uses macOS's built-in caffeinate tied to this process: it ends the moment StockBot stops."""
+    if sys.platform == "darwin" and shutil.which("caffeinate"):
+        subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 @app.on_event("startup")
 def _startup():
+    _stay_awake()
     threading.Thread(target=_loop, daemon=True).start()
     remote.start()
     discord.online()
