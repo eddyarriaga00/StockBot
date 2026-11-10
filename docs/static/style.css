@@ -272,3 +272,9 @@ body.remote .local-only { display: none !important; }
 /* Discord card */
 .dc-opts { flex-wrap: wrap; gap: 18px; margin: 10px 0; }
 #discord-card .row + .row { margin-top: 10px; }
+
+/* Bot next action + targets */
+.bot-next { margin-top: 8px; }
+.bot-targets { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bot-targets .chip { background: var(--line); border-radius: 99px; padding: 2px 10px; font-size: 13px; cursor: help; }
+#bot-health { margin-top: 6px; }

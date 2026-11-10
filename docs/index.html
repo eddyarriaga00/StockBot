@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StockBot</title>
   <meta name="description" content="StockBot: a trading bot that runs a live tournament of strategies on fake money. Watch its trades, charts, and results.">
-  <link rel="stylesheet" href="static/style.css?v=5">
+  <link rel="stylesheet" href="static/style.css?v=6">
   <script src="static/vendor/lightweight-charts.js"></script>
 </head>
 <body>
@@ -176,6 +176,9 @@
       <h2>Auto-trader</h2>
       <button class="ghost small" data-open-lesson="bot">Learn how this works</button>
       <div id="bot-summary" class="muted">—</div>
+      <div id="bot-next" class="bot-next"></div>
+      <div id="bot-targets" class="bot-targets"></div>
+      <div id="bot-health" class="muted small live-only"></div>
     </div>
     <div class="bot-actions live-only">
       <label class="switch"><input type="checkbox" id="bot-enabled"><span></span><b id="bot-enabled-label">Off</b></label>
@@ -286,7 +289,7 @@
 </main>
 
 <div id="toasts"></div>
-<script src="static/app.js?v=8"></script>
+<script src="static/app.js?v=9"></script>
 <script src="static/learn.js?v=1"></script>
 </body>
 </html>
