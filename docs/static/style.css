@@ -88,7 +88,7 @@ label.check input { width: auto; }
 .wl-row { display: grid; grid-template-columns: 1fr 60px auto; align-items: center; gap: 8px; padding: 9px 8px; border-radius: 8px; cursor: pointer; }
 .wl-row:hover, .wl-row.sel { background: var(--panel-2); }
 .wl-row b { display: block; }
-.wl-row .nm { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px; }
+.wl-row .nm { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px; }
 .wl-row .px { text-align: right; }
 .wl-row .chg { font-size: 11px; display: block; padding: 2px 5px; border-radius: 4px; margin-top: 2px; }
 .chg.up { background: rgba(34,195,142,.12); }
@@ -177,7 +177,7 @@ td.r, th.r { text-align: right; }
   .trade { grid-template-columns: minmax(0, 1fr) 300px; }
   .watchlist { grid-column: 1 / -1; position: static; max-height: none; display: block; }
   #watchlist { display: flex; overflow-x: auto; gap: 4px; }
-  .wl-row { min-width: 150px; grid-template-columns: 1fr auto; }
+  .wl-row { flex: 0 0 165px; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; }
   .wl-row > div:nth-child(2) { display: none; }
 }
 @media (max-width: 760px) {
