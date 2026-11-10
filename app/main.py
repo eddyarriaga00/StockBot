@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import market, strategy
 from .alpaca_broker import AlpacaBroker
 from .bot import DEFAULT_BOT, Bot
+from .health import Health
 from .discord import DEFAULT_DISCORD, Discord, valid_webhook
 from .sim_broker import OrderError, SimBroker
 from .publish import Publisher
@@ -89,6 +90,7 @@ bot = Bot(DATA, get_broker, load_settings, get_champion=tournament.champion)
 publisher = Publisher(ROOT, get_broker, bot, tournament, load_settings, bot.log, get_remote_url=lambda: remote.url)
 remote = Remote(DATA, PORT, on_url_change=lambda: publisher.publish())
 discord = Discord(DATA, load_settings, get_broker, tournament)
+health = Health(DATA)
 bot.on_log = discord.on_log
 app = FastAPI(title="StockBot")
 
@@ -126,7 +128,9 @@ def _loop():
             tournament.step(clock)
             publisher.step(clock)
             discord.step(clock)
+            health.beat()
         except Exception as e:  # keep running no matter what
+            health.loop_errors += 1
             bot.log(f"Loop error: {e}", "error")
             time.sleep(30)
         time.sleep(20)
@@ -149,6 +153,9 @@ def _startup():
     threading.Thread(target=_loop, daemon=True).start()
     remote.start()
     discord.online()
+    missed = health.missed_message()
+    if missed:
+        bot.log(missed, "warn")
 
 
 @app.on_event("shutdown")
@@ -378,7 +385,12 @@ def api_save_settings(body: dict = Body(...)):
 # ---------- bot ----------
 @app.get("/api/bot")
 def api_bot():
-    return bot.status()
+    return {**bot.status(), "health": health.status()}
+
+
+@app.get("/api/health")
+def api_health():
+    return health.status()
 
 
 @app.post("/api/bot/enable")

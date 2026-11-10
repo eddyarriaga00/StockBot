@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 
-from . import strategy
+from . import market, strategy
 from .sim_broker import OrderError
 
 DEFAULT_BOT = {
@@ -93,7 +93,48 @@ class Bot:
             "strategy": key, "strategy_name": strategy.STRATEGIES[key]["name"],
             "next_rebalance": self.state["last_rebalance"] + strategy.STRATEGIES[key]["rebalance_days"] * 86400 * 7 / 5,
             "last_scan": self.state.get("last_scan"),
+            "next_action": self.next_action(),
+            "targets": self.preview_targets(),
         }
+
+    def next_action(self):
+        """Plain-English answer to 'what will the bot do next, and when?'."""
+        cfg = self.cfg
+        if not cfg["enabled"]:
+            return "The bot is off. Turn it on to trade."
+        if self._halted_today_flag():
+            return "Paused for the rest of today (daily loss limit). Resumes tomorrow."
+        key = self.strategy_key
+        name = strategy.STRATEGIES[key]["name"]
+        days = strategy.STRATEGIES[key]["rebalance_days"]
+        due_at = self.state["last_rebalance"] + days * 86400 * 7 / 5 - 3600
+        switching = self.state["last_strategy"] != key
+        try:
+            clock = market.market_clock()
+        except market.MarketDataError:
+            clock = {"is_open": False, "session_start": None}
+        what = f"switch the account into {name}" if switching else f"rebalance {name}"
+        if switching or time.time() >= due_at:
+            if clock["is_open"]:
+                start = clock["session_start"] or time.time()
+                if time.time() - start > 1800:
+                    return f"Will {what} within a minute."
+                return f"Will {what} at {time.strftime('%I:%M %p', time.localtime(start + 1800))} (30 min after the open)."
+            return f"Will {what} 30 minutes after the next market open (about 10:00 AM ET)."
+        return f"Holding. Next {name} check {time.strftime('%a %b %d', time.localtime(due_at))}, 30 min after the open."
+
+    def _halted_today_flag(self):
+        return self.state["halted_day"] == _today()
+
+    def preview_targets(self):
+        try:
+            cfg = self.cfg
+            owned = list(self.state["owned"])
+            w, notes = strategy.targets(self.strategy_key, owned, reserve=cfg["cash_reserve_pct"] / 100,
+                                        max_stock_w=cfg["max_position_pct"] / 100)
+            return [{"symbol": s, "weight": x * 100, "why": notes.get(s, "")} for s, x in sorted(w.items(), key=lambda kv: -kv[1])]
+        except Exception:
+            return []
 
     # ---------- the plan ----------
     def plan_orders(self):

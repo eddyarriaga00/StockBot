@@ -598,6 +598,20 @@ function renderBot() {
     following <b>${esc(b.strategy_name)}</b>${c.strategy === "auto" ? " (current champion)" : ""} ·
     last rebalance ${b.last_rebalance ? when(b.last_rebalance) : "never"}${b.halted_today ? ' · <b class="down">halted today (loss limit)</b>' : ""}`;
 
+  $("#bot-next").innerHTML = b.next_action ? `<b>Next:</b> ${esc(b.next_action)}` : "";
+  $("#bot-targets").innerHTML = (b.targets || []).length ? `<span class="muted">Target portfolio:</span> ` +
+    b.targets.map((t) => `<span class="chip" title="${esc(t.why)}">${esc(t.symbol)} ${t.weight.toFixed(0)}%</span>`).join("") : "";
+  const h = b.health;
+  if (h) {
+    const ago = Math.max(0, Math.round(h.now - h.last_loop));
+    const up = h.uptime > 86400 ? (h.uptime / 86400).toFixed(1) + " days" : h.uptime > 3600 ? (h.uptime / 3600).toFixed(1) + " h" : Math.round(h.uptime / 60) + " min";
+    $("#bot-health").innerHTML = [
+      h.loop_ok ? `<span class="up">● Running</span> (checked ${ago}s ago)` : `<span class="down">● Not checking prices</span> (last ${ago}s ago)`,
+      `up ${up}`,
+      h.awake === false ? '<span class="down">Mac may sleep</span>' : h.awake ? "keeping Mac awake" : "",
+    ].filter(Boolean).join(" · ");
+  }
+
   $("#pending-card").classList.toggle("hidden", !b.pending.length);
   $("#pending").innerHTML = b.pending.map((p) => `<div class="pending-row"><div><b>${p.side.toUpperCase()} ${p.symbol}</b>
     ${p.notional ? money(p.notional) : shares(p.qty) + " sh"} <span class="muted">· ${esc(p.reason)}</span></div>
