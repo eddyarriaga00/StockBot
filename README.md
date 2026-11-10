@@ -20,6 +20,13 @@ The **Learn** tab includes seven short lessons, retryable quizzes, saved browser
   Tunnel requests need a login token, the passcode can only be seen or changed on the Mac, wrong guesses lock out
   for 15 minutes, and only the StockBot website may call the API. Turn it off any time in Settings.
 
+## Discord
+
+StockBot can post to a Discord channel: every trade with the bot's reason, alerts (approvals waiting, loss halts, errors),
+a daily summary after the close (account value, day P/L vs SPY, holdings), and the weekly tournament report card.
+In Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. Paste it in StockBot's
+Settings → Discord and click Connect. The link is stored only on this Mac.
+
 ## Screens
 - **Trade**: search, watchlist, live charts (1D to MAX, line or candles), key stats, news, and an order ticket
   (market / limit / stop / stop-limit / trailing stop, shares or dollars, day or GTC, take-profit / stop-loss) with a review step.

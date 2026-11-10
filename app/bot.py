@@ -49,11 +49,19 @@ class Bot:
                 json.dump(self.state, f)
             os.replace(tmp, self.path)
 
+    on_log = None  # optional hook, e.g. Discord alerts
+
     def log(self, msg, kind="info"):
+        entry = {"time": time.time(), "kind": kind, "msg": msg}
         with self.lock:
-            self.state["log"].insert(0, {"time": time.time(), "kind": kind, "msg": msg})
+            self.state["log"].insert(0, entry)
             del self.state["log"][300:]
         self.save()
+        if self.on_log:
+            try:
+                self.on_log(entry)
+            except Exception:
+                pass
 
     @property
     def cfg(self):

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StockBot</title>
   <meta name="description" content="StockBot: a trading bot that runs a live tournament of strategies on fake money. Watch its trades, charts, and results.">
-  <link rel="stylesheet" href="static/style.css?v=4">
+  <link rel="stylesheet" href="static/style.css?v=5">
   <script src="static/vendor/lightweight-charts.js"></script>
 </head>
 <body>
@@ -261,6 +261,23 @@
       <button id="remote-revoke" class="danger">Sign out all devices</button>
     </div>
   </div>
+  <div class="card live-only" id="discord-card">
+    <h3>Discord</h3>
+    <p class="muted">Get trades, alerts, a daily summary after the close, and the weekly report card in a Discord channel.</p>
+    <ol class="steps">
+      <li>In Discord, open your server → <b>Server Settings</b> → <b>Integrations</b> → <b>Webhooks</b> → <b>New Webhook</b>.</li>
+      <li>Pick the channel, click <b>Copy Webhook URL</b>, paste it below, and click <b>Connect</b>.</li>
+    </ol>
+    <div class="row"><input id="dc-url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off" style="flex:1"><button id="dc-save" class="primary">Connect</button></div>
+    <p id="dc-status" class="muted small"></p>
+    <div class="row dc-opts">
+      <label class="switch"><input type="checkbox" data-dc="trades"><span></span><b>Trades</b></label>
+      <label class="switch"><input type="checkbox" data-dc="alerts"><span></span><b>Alerts</b></label>
+      <label class="switch"><input type="checkbox" data-dc="daily"><span></span><b>Daily summary</b></label>
+      <label class="switch"><input type="checkbox" data-dc="weekly"><span></span><b>Weekly report</b></label>
+    </div>
+    <div class="row"><button id="dc-test" class="ghost">Send test message</button><button id="dc-summary" class="ghost">Send summary now</button><button id="dc-clear" class="danger">Disconnect</button></div>
+  </div>
   <div class="card">
     <h3>Simulator</h3>
     <p class="muted">Start over with a fresh fake account.</p>
@@ -269,7 +286,7 @@
 </main>
 
 <div id="toasts"></div>
-<script src="static/app.js?v=6"></script>
+<script src="static/app.js?v=7"></script>
 <script src="static/learn.js?v=1"></script>
 </body>
 </html>

@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from . import market, strategy
 from .alpaca_broker import AlpacaBroker
 from .bot import DEFAULT_BOT, Bot
+from .discord import DEFAULT_DISCORD, Discord, valid_webhook
 from .sim_broker import OrderError, SimBroker
 from .publish import Publisher
 from .remote import Remote
@@ -31,6 +32,8 @@ DEFAULT_SETTINGS = {
     "alpaca_live_key": "", "alpaca_live_secret": "",
     "watchlist": ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"],
     "bot": DEFAULT_BOT,
+    "discord_webhook": "",
+    "discord": DEFAULT_DISCORD,
 }
 _settings_lock = threading.Lock()
 
@@ -48,7 +51,8 @@ def load_settings():
             b["stop_atr"] = 0.0
         b["stops_reviewed"] = True
         save_settings({**DEFAULT_SETTINGS, **s})
-    return {**DEFAULT_SETTINGS, **s, "bot": {**DEFAULT_BOT, **s.get("bot", {})}}
+    return {**DEFAULT_SETTINGS, **s, "bot": {**DEFAULT_BOT, **s.get("bot", {})},
+            "discord": {**DEFAULT_DISCORD, **s.get("discord", {})}}
 
 
 def save_settings(s):
@@ -81,6 +85,8 @@ tournament = Tournament(DATA)
 bot = Bot(DATA, get_broker, load_settings, get_champion=tournament.champion)
 publisher = Publisher(ROOT, get_broker, bot, tournament, load_settings, bot.log, get_remote_url=lambda: remote.url)
 remote = Remote(DATA, PORT, on_url_change=lambda: publisher.publish())
+discord = Discord(DATA, load_settings, get_broker, tournament)
+bot.on_log = discord.on_log
 app = FastAPI(title="StockBot")
 
 OPEN_REMOTE_PATHS = {"/api/remote/ping", "/api/remote/login"}
@@ -116,6 +122,7 @@ def _loop():
             bot.step(clock)
             tournament.step(clock)
             publisher.step(clock)
+            discord.step(clock)
         except Exception as e:  # keep running no matter what
             bot.log(f"Loop error: {e}", "error")
             time.sleep(30)
@@ -130,6 +137,7 @@ def _err(e):
 def _startup():
     threading.Thread(target=_loop, daemon=True).start()
     remote.start()
+    discord.online()
 
 
 @app.on_event("shutdown")
@@ -309,7 +317,8 @@ def _mask(v):
 @app.get("/api/settings")
 def api_settings():
     s = load_settings()
-    return {"broker": s["broker"], "bot": s["bot"],
+    return {"broker": s["broker"], "bot": s["bot"], "discord": s["discord"], "discord_webhook": _mask(s["discord_webhook"]),
+            "discord_error": discord.last_error,
             **{k: _mask(s[k]) for k in ("alpaca_paper_key", "alpaca_paper_secret", "alpaca_live_key", "alpaca_live_secret")}}
 
 
@@ -319,6 +328,15 @@ def api_save_settings(body: dict = Body(...)):
     for k in ("alpaca_paper_key", "alpaca_paper_secret", "alpaca_live_key", "alpaca_live_secret"):
         if body.get(k):
             s[k] = body[k].strip()
+    if body.get("discord_webhook"):
+        url = body["discord_webhook"].strip()
+        if not valid_webhook(url):
+            _err("That isn't a Discord webhook link. It should start with https://discord.com/api/webhooks/")
+        s["discord_webhook"] = url
+    if body.get("discord_clear"):
+        s["discord_webhook"] = ""
+    if isinstance(body.get("discord"), dict):
+        s["discord"] = {**s["discord"], **{k: bool(v) for k, v in body["discord"].items() if k in DEFAULT_DISCORD}}
     if "bot" in body:
         s["bot"] = {**s["bot"], **{k: v for k, v in body["bot"].items() if k in DEFAULT_BOT or k == "stops_reviewed"}}
     if "broker" in body and body["broker"] != s["broker"]:
@@ -383,6 +401,28 @@ def api_bot_backtest():
 @app.get("/api/bot/backtest")
 def api_bot_backtest_get():
     return strategy.backtest_all()
+
+
+@app.post("/api/discord/test")
+def api_discord_test(body: dict = Body(default={})):
+    url = (body.get("discord_webhook") or "").strip() or load_settings()["discord_webhook"]
+    if not url:
+        _err("Paste your Discord webhook link first.")
+    err = discord.post_now({"username": "StockBot", "embeds": [{
+        "title": "👋 StockBot is connected", "color": 0x22C38E,
+        "description": "Trades, alerts, a daily summary after the close, and the weekly report card will show up here. "
+                       "[Open StockBot](https://eddyarriaga00.github.io/StockBot/)"}]}, url)
+    if err:
+        _err(err)
+    return {"ok": True}
+
+
+@app.post("/api/discord/summary")
+def api_discord_summary():
+    if not load_settings()["discord_webhook"]:
+        _err("Connect Discord first.")
+    discord.daily_summary()
+    return {"ok": True}
 
 
 @app.get("/api/strategies")

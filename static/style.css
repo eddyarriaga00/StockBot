@@ -268,3 +268,7 @@ body.remote .local-only { display: none !important; }
 .remote-actions .switch { margin-right: 8px; }
 #remote-info code { font-size: 15px; letter-spacing: .06em; }
 @media (max-width: 760px) { .remote-login { flex-direction: column; } }
+
+/* Discord card */
+.dc-opts { flex-wrap: wrap; gap: 18px; margin: 10px 0; }
+#discord-card .row + .row { margin-top: 10px; }

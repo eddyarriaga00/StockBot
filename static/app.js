@@ -725,6 +725,7 @@ async function refreshSettings() {
   $("#k-ps").placeholder = s.alpaca_paper_secret ? "saved" : "";
   $("#k-lk").placeholder = s.alpaca_live_key || "AK…";
   $("#k-ls").placeholder = s.alpaca_live_secret ? "saved" : "";
+  refreshDiscord(s);
   const badge = $("#broker-badge");
   badge.textContent = { sim: "SIMULATOR", alpaca_paper: "ALPACA PAPER", alpaca_live: "LIVE · REAL MONEY" }[s.broker];
   badge.classList.toggle("live", s.broker === "alpaca_live");
@@ -750,6 +751,43 @@ $("#keys-save").addEventListener("click", async () => {
   ["#k-pk", "#k-ps", "#k-lk", "#k-ls"].forEach((s) => ($(s).value = ""));
   toast("Keys saved. Now pick Alpaca Paper above.", "ok");
   refreshSettings();
+});
+// ---------- Discord ----------
+function refreshDiscord(s) {
+  if (!s.discord) return;
+  const on = !!s.discord_webhook;
+  $("#dc-url").placeholder = on ? `Connected (${s.discord_webhook})` : "https://discord.com/api/webhooks/…";
+  $("#dc-status").textContent = on ? (s.discord_error ? "Last send failed: " + s.discord_error : "Connected. Messages go to your Discord channel.") : "Not connected.";
+  $$("[data-dc]").forEach((c) => (c.checked = !!s.discord[c.dataset.dc]));
+  ["#dc-test", "#dc-summary", "#dc-clear"].forEach((id) => ($(id).disabled = !on));
+}
+$("#dc-save").addEventListener("click", async () => {
+  const url = $("#dc-url").value.trim();
+  if (!url) return toast("Paste the webhook link first.", "bad");
+  try {
+    await api("/api/discord/test", { method: "POST", body: { discord_webhook: url } });
+    await api("/api/settings", { method: "POST", body: { discord_webhook: url } });
+    $("#dc-url").value = "";
+    toast("Discord connected. Check your channel for a hello message.", "ok");
+    refreshSettings();
+  } catch (e) { toast(e.message, "bad"); }
+});
+$$("[data-dc]").forEach((c) => c.addEventListener("change", async () => {
+  try { await api("/api/settings", { method: "POST", body: { discord: { [c.dataset.dc]: c.checked } } }); }
+  catch (e) { toast(e.message, "bad"); }
+}));
+$("#dc-test").addEventListener("click", async () => {
+  try { await api("/api/discord/test", { method: "POST", body: {} }); toast("Test message sent.", "ok"); }
+  catch (e) { toast(e.message, "bad"); }
+});
+$("#dc-summary").addEventListener("click", async () => {
+  try { await api("/api/discord/summary", { method: "POST" }); toast("Summary sent.", "ok"); }
+  catch (e) { toast(e.message, "bad"); }
+});
+$("#dc-clear").addEventListener("click", async () => {
+  if (!confirm("Stop sending to Discord?")) return;
+  await api("/api/settings", { method: "POST", body: { discord_clear: true } });
+  toast("Discord disconnected.", "ok"); refreshSettings();
 });
 $("#reset").addEventListener("click", async () => {
   if (!confirm("Erase all simulator trades and start fresh?")) return;
