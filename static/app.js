@@ -631,14 +631,14 @@ async function refreshTournament() {
   t.rows.forEach((r) => (strategyNames[r.key] = r.name));
   const champ = t.rows.find((r) => r.champion);
   $("#t-champion").innerHTML = `<span class="champ">🏆 Champion: ${esc(champ?.name)}</span> · ${esc(t.reason)}`;
-  const rows = [...t.rows].sort((a, b) => b.live_return - a.live_return || b.bt_oos.sharpe - a.bt_oos.sharpe);
+  const rows = [...t.rows].sort((a, b) => b.live_return - a.live_return || (b.bt_checked?.sharpe ?? 0) - (a.bt_checked?.sharpe ?? 0));
   $("#t-table").innerHTML = `<tr><th>Strategy</th><th class="r">Live return</th><th class="r">vs SPY</th><th class="r">Today</th><th class="r">Worst drop</th>
-    <th class="r">Trades</th><th class="r">Days live</th><th class="r">Backtest held-out /yr</th><th class="r">Held-out worst drop</th><th class="r">Sharpe</th><th>Holding now</th></tr>` +
+    <th class="r">Trades</th><th class="r">Days live</th><th class="r">Backtest held-out /yr</th><th class="r" title="10-year backtest re-run without the 6 stocks that rose the most, so it can't cheat with hindsight">Honest backtest /yr</th><th class="r">Honest worst drop</th><th class="r">Honest Sharpe</th><th>Holding now</th></tr>` +
     rows.map((r) => `<tr><td><b style="color:${PALETTE[r.key]}">${esc(r.name)}</b>${r.champion ? ' <span class="champ">🏆</span>' : ""}<span class="about">${esc(r.about)}</span></td>
       <td class="r ${cls(r.live_return)}">${pct(r.live_return)}</td><td class="r ${cls(r.vs_spy)}">${r.started ? (r.vs_spy >= 0 ? "+" : "") + r.vs_spy.toFixed(2) + " pts" : "—"}</td>
       <td class="r ${cls(r.day_pl_pct)}">${pct(r.day_pl_pct)}</td><td class="r">${r.live_max_drawdown.toFixed(1)}%</td>
       <td class="r">${r.trades}</td><td class="r">${r.trading_days}/${t.live_days_needed}</td>
-      <td class="r ${r.beats_spy_oos ? "up" : ""}">${pct(r.bt_oos.cagr)}</td><td class="r">${r.bt_oos.max_drawdown.toFixed(1)}%</td><td class="r">${r.bt_oos.sharpe.toFixed(2)}</td>
+      <td class="r ${r.beats_spy_oos ? "up" : ""}">${pct(r.bt_oos.cagr)}</td><td class="r">${r.bt_checked ? pct(r.bt_checked.cagr) : "—"}</td><td class="r">${r.bt_checked ? r.bt_checked.max_drawdown.toFixed(1) + "%" : "—"}</td><td class="r">${r.bt_checked ? r.bt_checked.sharpe.toFixed(2) : "—"}</td>
       <td class="muted small">${r.holdings.sort((a, b) => b.weight - a.weight).slice(0, 6).map((h) => `${h.symbol} ${h.weight.toFixed(0)}%`).join(", ") || "Waiting for market open"}</td></tr>`).join("");
   const curves = await api("/api/tournament/curves").catch(() => ({}));
   setLines(tChart, tLines, curves);
@@ -658,7 +658,7 @@ async function loadBacktest(force) {
     setLines(btChart, btLines, curves);
     $("#bt-legend").innerHTML = legend(Object.keys(curves));
     const d = (t) => new Date(t * 1000).toLocaleDateString([], { month: "short", year: "numeric" });
-    $("#bt-caveat").textContent = `${d(bt.start)} to ${d(bt.end)}. Held-out test period starts ${d(bt.split)}: strategies were never tuned on it. ${bt.caveat}`;
+    $("#bt-caveat").textContent = `${d(bt.start)} to ${d(bt.end)}. Held-out test period starts ${d(bt.split)}: strategies were never tuned on it. "Honest" numbers in the tournament table re-run every strategy without ${(bt.hindsight_winners || []).join(", ") || "the biggest winners"}. ${bt.caveat}`;
     if (force) refreshTournament();
   } catch (e) { $("#bt-caveat").textContent = "Backtest failed: " + e.message; }
 }

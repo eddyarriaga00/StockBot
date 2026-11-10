@@ -15,7 +15,8 @@ from . import market, strategy
 from .bot import Bot
 from .sim_broker import SimBroker
 
-LIVE_DAYS = 60       # about 3 months of trading days before live results take over
+LIVE_DAYS = 60        # about 3 months of trading days before live results take over
+RULE_VERSION = 2      # bump when the champion rule changes so it's re-picked right away
 REVIEW_EVERY = 7 * 86400
 
 
@@ -37,8 +38,8 @@ class Tournament:
             self.entries[key] = {"broker": broker,
                                  "bot": Bot(self.dir, (lambda b=broker: b), state_name=f"{key}.json", strategy_key=key)}
         # New or removed strategies: pick the champion again right away instead of waiting for the weekly review.
-        if sorted(self.entries) != sorted(self.state.get("keys", [])):
-            self.state["keys"] = sorted(self.entries)
+        if sorted(self.entries) != sorted(self.state.get("keys", [])) or self.state.get("rule") != RULE_VERSION:
+            self.state["keys"], self.state["rule"] = sorted(self.entries), RULE_VERSION
             self.state["reviewed"] = 0
 
     def save(self):
@@ -91,7 +92,7 @@ class Tournament:
                 "trading_days": _trading_days(started["time"]) if started else 0, "started": started["time"] if started else None,
                 "trades": sum(1 for o in e["broker"].orders("closed", 10000) if o["status"] == "filled"),
                 "holdings": [{"symbol": p["symbol"], "weight": p["market_value"] / acct["equity"] * 100} for p in e["broker"].positions()],
-                "bt_oos": b["oos"], "bt_full": b["full"], "beats_spy_oos": b["beats_spy_oos"],
+                "bt_oos": b["oos"], "bt_full": b["full"], "bt_checked": b["checked"]["full"], "beats_spy_oos": b["beats_spy_oos"],
                 "champion": key == self.champion(),
             })
         return {"champion": self.champion(), "reason": self.state["champion_reason"], "live_days_needed": LIVE_DAYS,
@@ -120,9 +121,9 @@ class Tournament:
             best_ret, best = max(scored)
             reason = f"Best live paper return ({best_ret:+.1f}%) over {LIVE_DAYS}+ trading days without a much worse drop than SPY."
         else:
-            best_sharpe, best = max((v["oos"]["sharpe"], k) for k, v in bt.items())
-            reason = (f"Highest out-of-sample backtest Sharpe ({best_sharpe:.2f}). "
-                      f"Live paper results take over after {LIVE_DAYS} trading days.")
+            best_sharpe, best = max((v["checked"]["full"]["sharpe"], k) for k, v in bt.items())
+            reason = (f"Best risk-adjusted 10-year backtest (Sharpe {best_sharpe:.2f}) even without the biggest "
+                      f"hindsight winners. Live paper results take over after {LIVE_DAYS} trading days.")
         with self.lock:
             prev = self.state["champion"]
             self.state.update(champion=best, champion_reason=reason, reviewed=time.time())
@@ -147,11 +148,11 @@ class Tournament:
         rows = sorted(s["rows"], key=lambda r: -r["live_return"])
         lines = [f"# StockBot weekly report card: {dt.date.today():%B %d, %Y}", "",
                  f"**Champion:** {strategy.STRATEGIES[s['champion']]['name']}. {s['reason']}", "",
-                 "| Rank | Strategy | Live return | vs SPY | Worst drop | Trades | Days live | Backtest (out-of-sample) |",
-                 "|---|---|---|---|---|---|---|---|"]
+                 "| Rank | Strategy | Live return | vs SPY | Worst drop | Trades | Days live | Backtest (out-of-sample) | Backtest without hindsight winners |",
+                 "|---|---|---|---|---|---|---|---|---|"]
         for n, r in enumerate(rows, 1):
             lines.append(f"| {n} | {r['name']}{' 🏆' if r['champion'] else ''} | {r['live_return']:+.2f}% | {r['vs_spy']:+.2f} pts | "
-                         f"{r['live_max_drawdown']:.1f}% | {r['trades']} | {r['trading_days']} | {r['bt_oos']['cagr']:.1f}%/yr |")
+                         f"{r['live_max_drawdown']:.1f}% | {r['trades']} | {r['trading_days']} | {r['bt_oos']['cagr']:.1f}%/yr | {r['bt_checked']['cagr']:.1f}%/yr |")
         lines += ["", "Each strategy trades its own fake $100,000 on live prices.",
                   f"Results under {LIVE_DAYS} trading days are mostly noise: don't read much into one good or bad week."]
         path = os.path.join(self.reports_dir, f"report-{dt.date.today().isoformat()}.md")

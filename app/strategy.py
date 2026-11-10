@@ -15,6 +15,7 @@ Strategies (all well-known, published styles, not secret edges):
 - nasdaq_2x:        2x Nasdaq-100 (QLD) while the Nasdaq is above its 200-day avg and calm, T-bills otherwise.
 - spy_hold:         just hold SPY. The baseline every other strategy has to beat.
 """
+import copy
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -40,6 +41,8 @@ UNIVERSE = STOCKS
 class Context:
     """Daily closes for every symbol aligned to SPY's trading calendar, with fast rolling helpers."""
 
+    stocks = None  # stock universe for this run; None = STOCKS (the hindsight check uses a smaller list)
+
     def __init__(self, raw: dict):
         spy = raw[BENCHMARK]
         self.dates = [c["time"] // 86400 * 86400 for c in spy]
@@ -63,6 +66,10 @@ class Context:
                 run += v or 0.0
                 cum.append(run)
             self.cum[s] = cum
+
+    @property
+    def universe(self):
+        return self.stocks if self.stocks is not None else STOCKS
 
     @property
     def last(self):
@@ -140,7 +147,7 @@ def trend_momentum(ctx, i, holdings):
     if not ctx.risk_on(i):
         return {SAFE: 1.0}, {SAFE: "SPY below its 200-day average: risk-off, holding T-bills"}
     scored = []
-    for s in STOCKS:
+    for s in ctx.universe:
         p, s50, s200, r = ctx.px(s, i), ctx.sma(s, i, 50), ctx.sma(s, i, 200), ctx.rsi(s, i)
         m, v = ctx.ret(s, i, 126), ctx.vol(s, i)
         if None in (p, s50, s200, r, m, v) or not (p > s50 > s200) or r >= 80:
@@ -159,7 +166,7 @@ def concentrated(ctx, i, holdings):
     if not ctx.risk_on(i):
         return {SAFE: 1.0}, {SAFE: "SPY below its 200-day average: risk-off"}
     scored = []
-    for s in STOCKS:
+    for s in ctx.universe:
         p, s200, m = ctx.px(s, i), ctx.sma(s, i, 200), ctx.ret(s, i, 252, skip=21)
         if None in (p, s200, m) or p < s200:
             continue
@@ -199,11 +206,11 @@ def sector_rotation(ctx, i, holdings):
 def dip_buyer(ctx, i, holdings):
     weights, notes = {}, {}
     for s in holdings:
-        if s in STOCKS and ctx.has(s, i, 5) and ctx.px(s, i) <= ctx.sma(s, i, 5):
+        if s in ctx.universe and ctx.has(s, i, 5) and ctx.px(s, i) <= ctx.sma(s, i, 5):
             weights[s] = 0.10
             notes[s] = "Holding: waiting for the bounce above the 5-day avg"
     cands = []
-    for s in STOCKS:
+    for s in ctx.universe:
         if s in weights:
             continue
         p, s200, r2 = ctx.px(s, i), ctx.sma(s, i, 200), ctx.rsi(s, i, 2)
@@ -229,7 +236,7 @@ def _momentum_top(ctx, i, holdings, n):
     if not ctx.risk_on(i):
         return {SAFE: 1.0}, {SAFE: "SPY below its 200-day average: risk-off, holding T-bills"}
     scored = []
-    for s in STOCKS:
+    for s in ctx.universe:
         p, s200 = ctx.px(s, i), ctx.sma(s, i, 200)
         score, rs = _blended_momentum(ctx, s, i)
         if None in (p, s200, score) or p < s200:
@@ -328,7 +335,17 @@ def backtest_all(years="10y", cost=0.0005, force=False):
     spy = out["spy_hold"]
     for key, r in out.items():
         r["beats_spy_oos"] = r["oos"]["cagr"] > spy["oos"]["cagr"] and key != "spy_hold"
+    # Hindsight check: the stock list is today's giants, so a backtest "knows" who won. Re-run every strategy
+    # without the 6 stocks that rose the most over the period. What survives this is more likely to be a real edge.
+    gains = sorted((ctx.px(s, ctx.last) / ctx.px(s, max(start, ctx.first[s])), s) for s in STOCKS if s in ctx.closes)
+    winners = [s for _, s in gains[-6:]]
+    checked_ctx = copy.copy(ctx)
+    checked_ctx.stocks = [s for s in STOCKS if s not in winners]
+    for key, r in out.items():
+        c = _run(checked_ctx, key, start, split, cost)
+        r["checked"] = {"full": c["full"], "oos": c["oos"]}
     result = {"strategies": out, "start": ctx.dates[start], "split": ctx.dates[split], "end": ctx.dates[-1],
+              "hindsight_winners": winners,
               "caveat": "Backtests use today's well-known large caps (survivorship bias) and can't capture everything, "
                         "so real results will likely be worse. Live paper results decide the champion once they exist."}
     _bt_cache.update(time=time.time(), result=result)
