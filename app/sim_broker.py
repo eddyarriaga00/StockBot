@@ -9,9 +9,14 @@ Rules modeled after how US retail brokers behave:
 - Cash account: no margin, no short selling, buying power reserved by open buy orders.
 - Fractional shares and dollar-amount orders allowed for market orders only.
 - Bracket orders attach a take-profit and a stop-loss that cancel each other (OCO).
+- Limit orders can opt in to pre-market and after-hours trading (4:00 AM to 8:00 PM ET), where spreads are wider.
+- Large market orders move the price against you, in proportion to their share of the day's volume.
+- Stop prices must be on the right side of the market, and prices of $1 or more can't use fractions of a cent.
+- Open orders can be edited (quantity and prices) without losing their place.
 - Dividends are paid in cash on the ex-dividend date (real brokers pay a few weeks later), and stock splits
   change the share count and average cost and cancel that stock's open orders.
 """
+import math
 import sqlite3
 import threading
 import time
@@ -22,6 +27,7 @@ from . import market
 TYPES = ("market", "limit", "stop", "stop_limit", "trailing_stop")
 OPEN_STATUSES = ("new", "accepted", "held")
 ACTIONS_EVERY = 1800  # seconds between dividend / split checks
+EXT_STALE = 900       # outside regular hours, only trade against a price from the last 15 minutes
 
 
 class OrderError(Exception):
@@ -56,6 +62,9 @@ class SimBroker:
                 CREATE TABLE IF NOT EXISTS activity (id TEXT PRIMARY KEY, time REAL, kind TEXT, symbol TEXT, amount REAL, qty REAL, note TEXT);
                 """
             )
+            cols = {r["name"] for r in self.db.execute("PRAGMA table_info(orders)")}
+            if "extended_hours" not in cols:  # databases from before extended-hours trading
+                self.db.execute("ALTER TABLE orders ADD COLUMN extended_hours INTEGER DEFAULT 0")
             if not self.db.execute("SELECT 1 FROM account").fetchone():
                 self.db.execute("INSERT INTO account VALUES (1, ?, ?, ?)", (starting_cash, starting_cash, time.time()))
             self.db.commit()
@@ -214,6 +223,7 @@ class SimBroker:
         trail_percent = _num(req.get("trail_percent"))
         take_profit = _num(req.get("take_profit"))
         stop_loss = _num(req.get("stop_loss"))
+        ext = bool(req.get("extended_hours"))
 
         if side not in ("buy", "sell"):
             raise OrderError("Side must be buy or sell.")
@@ -237,12 +247,19 @@ class SimBroker:
             raise OrderError("Trail percent required.")
         if (take_profit or stop_loss) and side != "buy":
             raise OrderError("Brackets can only be attached to buy orders.")
+        if ext and (otype != "limit" or take_profit or stop_loss):
+            raise OrderError("Pre-market and after-hours orders must be plain limit orders.")
+        if trail_percent is not None and not 0 < trail_percent < 100:
+            raise OrderError("Trail percent must be between 0 and 100.")
+        for label, v in (("Limit price", limit_price), ("Stop price", stop_price), ("Take profit", take_profit), ("Stop loss", stop_loss)):
+            _check_price(label, v)
 
         try:
             q = market.quote(symbol)
         except market.MarketDataError:
             raise OrderError(f"Unknown symbol {symbol}.")
 
+        _check_stop_side(side, otype, stop_price, q)
         with self.lock:
             if side == "buy":
                 est_px = limit_price if otype in ("limit", "stop_limit") else max(q["ask"], stop_price or 0)
@@ -260,12 +277,13 @@ class SimBroker:
             oid = str(uuid.uuid4())
             self.db.execute(
                 """INSERT INTO orders (id, symbol, side, type, qty, notional, limit_price, stop_price, trail_percent, hwm,
-                   tif, status, created_at, updated_at, expires_at, take_profit, stop_loss, source, reason)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   tif, status, created_at, updated_at, expires_at, take_profit, stop_loss, source, reason, extended_hours)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (oid, symbol, side, otype, qty, notional, limit_price, stop_price, trail_percent,
-                 q["price"] if otype == "trailing_stop" else None, tif, "accepted" if not q["market_open"] else "new",
-                 now, now, q["session_end"] if (tif == "day" and q["market_open"]) else None,
-                 take_profit, stop_loss, source, reason),
+                 q["price"] if otype == "trailing_stop" else None, tif,
+                 "new" if q["market_open"] or (ext and _ext_active(q, now)) else "accepted",
+                 now, now, _day_expiry(q, ext, now) if tif == "day" else None,
+                 take_profit, stop_loss, source, reason, int(ext)),
             )
             self.db.commit()
         self.tick(only=oid)
@@ -285,6 +303,51 @@ class SimBroker:
                 raise OrderError(f"Order is already {o['status']}.")
             self._set_status(oid, "canceled")
             self.db.commit()
+        return self.get_order(oid)
+
+    def replace_order(self, oid: str, changes: dict) -> dict:
+        """Edit an open order's quantity or prices, with the same checks as a new order."""
+        with self.lock:
+            o = self.get_order(oid)
+            if o["status"] not in OPEN_STATUSES:
+                raise OrderError(f"Order is already {o['status']}.")
+            if o["notional"]:
+                raise OrderError("Dollar-amount orders can't be edited. Cancel it and place a new one.")
+            new = {k: (_num(changes.get(k)) if changes.get(k) not in (None, "") else o[k])
+                   for k in ("qty", "limit_price", "stop_price", "trail_percent")}
+            if not new["qty"] or new["qty"] <= 0:
+                raise OrderError("Quantity must be greater than zero.")
+            if o["type"] != "market" and new["qty"] != int(new["qty"]):
+                raise OrderError("Fractional shares are only allowed on market orders.")
+            if o["type"] in ("limit", "stop_limit") and not new["limit_price"]:
+                raise OrderError("Limit price required.")
+            if o["type"] in ("stop", "stop_limit") and not new["stop_price"]:
+                raise OrderError("Stop price required.")
+            if o["type"] == "trailing_stop" and not 0 < (new["trail_percent"] or 0) < 100:
+                raise OrderError("Trail percent must be between 0 and 100.")
+            _check_price("Limit price", new["limit_price"])
+            _check_price("Stop price", new["stop_price"])
+            try:
+                q = market.quote(o["symbol"])
+            except market.MarketDataError:
+                raise OrderError("Prices aren't available right now. Try again in a moment.")
+            if not o["triggered"]:
+                _check_stop_side(o["side"], o["type"], new["stop_price"], q)
+            mine = o["qty"] - o["filled_qty"]
+            if o["side"] == "buy":
+                own_px = o["limit_price"] or o["stop_price"] or q["price"]
+                px = new["limit_price"] if o["type"] in ("limit", "stop_limit") else max(q["ask"], new["stop_price"] or 0)
+                bp = self._cash() - self._reserved_cash() + mine * own_px * 1.002
+                if new["qty"] * px > bp + 1e-6:
+                    raise OrderError(f"Insufficient buying power. Need ${new['qty'] * px:,.2f}, have ${bp:,.2f}.")
+            else:
+                free = self._held(o["symbol"]) - self._reserved_shares(o["symbol"]) + mine
+                if new["qty"] > free + 1e-9:
+                    raise OrderError(f"You can sell at most {free:g} shares of {o['symbol']} (no short selling).")
+            self.db.execute("UPDATE orders SET qty=?, limit_price=?, stop_price=?, trail_percent=?, updated_at=? WHERE id=?",
+                            (new["qty"], new["limit_price"], new["stop_price"], new["trail_percent"], time.time(), oid))
+            self.db.commit()
+        self.tick(only=oid)
         return self.get_order(oid)
 
     def cancel_all(self):
@@ -335,12 +398,22 @@ class SimBroker:
                 if o["expires_at"] and now >= o["expires_at"]:
                     self._set_status(o["id"], "expired")
                     continue
-                if not q["market_open"]:
+                ext = bool(o.get("extended_hours")) and _ext_active(q, now)
+                if not q["market_open"] and not ext:
                     if o["status"] == "new":
                         self._set_status(o["id"], "accepted")
                     continue
                 if o["tif"] == "day" and not o["expires_at"]:
-                    self.db.execute("UPDATE orders SET expires_at=? WHERE id=?", (q["session_end"], o["id"]))
+                    self.db.execute("UPDATE orders SET expires_at=? WHERE id=?", (_day_expiry(q, o.get("extended_hours"), now), o["id"]))
+                if not q["market_open"]:  # pre-market or after hours: limit orders only, against the wider quote
+                    stale = now - (q.get("ext_time") or 0) > EXT_STALE
+                    px = None if stale else q["ext_ask"] if o["side"] == "buy" and q["ext_ask"] <= o["limit_price"] else \
+                        q["ext_bid"] if o["side"] == "sell" and q["ext_bid"] >= o["limit_price"] else None
+                    if px is not None:
+                        self._fill(o, px)
+                    elif o["status"] == "accepted":
+                        self._set_status(o["id"], "new")
+                    continue
                 fill_px = self._fill_price(o, q)
                 if fill_px is not None:
                     self._fill(o, fill_px)
@@ -360,22 +433,33 @@ class SimBroker:
             self.db.execute("UPDATE orders SET hwm=? WHERE id=?", (hwm, o["id"]))
             trigger = hwm * (1 - o["trail_percent"] / 100) if not buy else hwm * (1 + o["trail_percent"] / 100)
             hit = q["price"] <= trigger if not buy else q["price"] >= trigger
-            return (ask if buy else bid) if hit else None
+            return self._slip(o, q, ask if buy else bid) if hit else None
         if t in ("stop", "stop_limit") and not o["triggered"]:
             hit = ask >= o["stop_price"] if buy else bid <= o["stop_price"]
             if not hit:
                 return None
             self.db.execute("UPDATE orders SET triggered=1 WHERE id=?", (o["id"],))
             if t == "stop":
-                return ask if buy else bid
+                return self._slip(o, q, ask if buy else bid)
         if t == "market" or (t == "stop" and o["triggered"]):
-            return ask if buy else bid
+            return self._slip(o, q, ask if buy else bid)
         # limit, or triggered stop-limit
         if buy and ask <= o["limit_price"]:
             return ask
         if not buy and bid >= o["limit_price"]:
             return bid
         return None
+
+    @staticmethod
+    def _slip(o, q, px):
+        """Price impact for orders that take whatever the market offers: the bigger the order is next to the
+        day's volume, the worse the price (square-root rule, capped at 3%). Small orders are unaffected."""
+        volume = q.get("est_volume") or q.get("volume")
+        qty = o["qty"] if o["qty"] is not None else (o["notional"] or 0) / px
+        if not volume or qty / volume < 0.0005:
+            return px
+        move = min(0.03, 0.02 * math.sqrt(qty / volume))
+        return round(px * (1 + move if o["side"] == "buy" else 1 - move), 4)
 
     def _fill(self, o, px):
         qty = o["qty"] if o["qty"] is not None else round(o["notional"] / px, 6)
@@ -443,6 +527,35 @@ class SimBroker:
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO equity VALUES (?, ?)", (time.time(), eq))
             self.db.commit()
+
+
+def _ext_active(q, now):
+    return q.get("session") in ("pre", "post") and bool(q.get("ext_price"))
+
+
+def _day_expiry(q, ext, now):
+    """When a day order stops working: the close, or the end of after-hours trading for extended-hours orders."""
+    if ext:
+        return q.get("post_end") if (q["market_open"] or q.get("session") in ("pre", "post")) else None
+    return q["session_end"] if q["market_open"] else None
+
+
+def _check_price(label, v):
+    if v is None:
+        return
+    if v <= 0:
+        raise OrderError(f"{label} must be greater than zero.")
+    if round(v, 2 if v >= 1 else 4) != round(v, 8):
+        raise OrderError(f"{label}: prices of $1 or more can have at most 2 decimal places (4 below $1).")
+
+
+def _check_stop_side(side, otype, stop_price, q):
+    if otype not in ("stop", "stop_limit") or not stop_price:
+        return
+    if side == "sell" and stop_price >= q["bid"]:
+        raise OrderError(f"A sell stop must be below the current price (${q['bid']:,.2f}). To sell now, use a market or limit order.")
+    if side == "buy" and stop_price <= q["ask"]:
+        raise OrderError(f"A buy stop must be above the current price (${q['ask']:,.2f}). To buy now, use a market or limit order.")
 
 
 def _num(v):

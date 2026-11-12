@@ -73,45 +73,98 @@ def _candles(res: dict) -> list:
     return out
 
 
-def spread_for(price: float) -> float:
-    """Estimated half-spread. Yahoo's free feed has no bid/ask, so model a tight large-cap spread."""
-    return max(0.01, round(price * 0.0002, 2))
+def spread_for(price: float, dollar_volume: float = None, widen: float = 1.0) -> float:
+    """Estimated half-spread. Yahoo's free feed has no bid/ask, so model it the way real spreads behave:
+    a fraction of a cent for the most traded stocks, much wider for thinly traded ones, and wider still
+    just after the open and outside regular hours (`widen`)."""
+    if dollar_volume is None:
+        bps = 2.0
+    elif dollar_volume >= 500e6:
+        bps = 1.0
+    elif dollar_volume >= 50e6:
+        bps = 2.5
+    elif dollar_volume >= 5e6:
+        bps = 6.0
+    elif dollar_volume >= 500e3:
+        bps = 20.0
+    else:
+        bps = 50.0
+    tick = 0.005 if price >= 1 else 0.0005  # a spread is at least one cent (a hundredth of a cent under $1)
+    return max(tick, price * bps / 10_000 * widen)
+
+
+def _px(v: float) -> float:
+    return round(v, 2 if v >= 1 else 4)
 
 
 def quote(symbol: str) -> dict:
     symbol = symbol.upper().strip()
 
     def load():
-        res = _chart(symbol, "1d", "1m")
+        res = _chart(symbol, "1d", "1m", prepost=True)
         m = res["meta"]
-        candles = _candles(res)
+        periods = m.get("currentTradingPeriod") or {}
+        period, pre, post = (periods.get(k) or {} for k in ("regular", "pre", "post"))
+        now = time.time()
+        every = _candles(res)
+        r_start, r_end = period.get("start", 0), period.get("end", 0)
+        candles = [c for c in every if r_start <= c["time"] < r_end] if period else every
         price = m.get("regularMarketPrice") or (candles[-1]["close"] if candles else None)
         if price is None:
             raise MarketDataError(f"No price for {symbol}")
         prev = m.get("chartPreviousClose") or m.get("previousClose") or price
-        half = spread_for(price)
-        period = (m.get("currentTradingPeriod") or {}).get("regular") or {}
-        now = time.time()
+        is_open = bool(period) and r_start <= now < r_end
+        if is_open:
+            session = "regular"
+        elif pre and pre.get("start", 0) <= now < pre.get("end", 0):
+            session = "pre"
+        elif post and post.get("start", 0) <= now < post.get("end", 0):
+            session = "post"
+        else:
+            session = "closed"
+        volume = m.get("regularMarketVolume") or sum(c["volume"] for c in candles)
+        # Early in the day, scale today's volume up to a full day so a stock doesn't look thinly traded at 9:35.
+        done = min(1.0, max(0.1, (now - r_start) / (r_end - r_start))) if is_open and r_end > r_start else 1.0
+        est_volume = volume / done if volume else 0
+        just_opened = is_open and now - r_start < 300
+        half = spread_for(price, price * est_volume if est_volume else None, 2.0 if just_opened else 1.0)
+        # Pre-market and after-hours: the last trade outside regular hours, if there was one.
+        if session == "pre":
+            ext = [c for c in every if pre.get("start", 0) <= c["time"] < r_start]
+        else:
+            ext = [c for c in every if r_end and c["time"] >= r_end] if not is_open else []
+        ext_price = ext[-1]["close"] if ext else None
+        ext_half = spread_for(ext_price, price * est_volume if est_volume else None, 4.0) if ext_price else None
         return {
             "symbol": symbol,
             "name": m.get("longName") or m.get("shortName") or symbol,
             "exchange": m.get("fullExchangeName") or m.get("exchangeName"),
             "type": m.get("instrumentType"),
             "price": price,
-            "bid": round(price - half, 2),
-            "ask": round(price + half, 2),
+            "bid": _px(price - half),
+            "ask": _px(price + half),
             "prev_close": prev,
             "change": price - prev,
             "change_pct": (price - prev) / prev * 100 if prev else 0,
             "open": candles[0]["open"] if candles else price,
             "high": m.get("regularMarketDayHigh") or (max(c["high"] for c in candles) if candles else price),
             "low": m.get("regularMarketDayLow") or (min(c["low"] for c in candles) if candles else price),
-            "volume": m.get("regularMarketVolume") or sum(c["volume"] for c in candles),
+            "volume": volume,
+            "est_volume": est_volume,
             "week52_high": m.get("fiftyTwoWeekHigh"),
             "week52_low": m.get("fiftyTwoWeekLow"),
-            "market_open": bool(period) and period.get("start", 0) <= now < period.get("end", 0),
+            "market_open": is_open,
+            "session": session,
             "session_start": period.get("start"),
             "session_end": period.get("end"),
+            "pre_start": pre.get("start"),
+            "post_end": post.get("end"),
+            "ext_price": ext_price,
+            "ext_time": ext[-1]["time"] if ext else None,
+            "ext_bid": _px(ext_price - ext_half) if ext_price else None,
+            "ext_ask": _px(ext_price + ext_half) if ext_price else None,
+            "ext_change": ext_price - price if ext_price else None,
+            "ext_change_pct": (ext_price - price) / price * 100 if ext_price and price else None,
             "time": m.get("regularMarketTime"),
             "spark": [c["close"] for c in candles[::5]],
         }
@@ -206,4 +259,5 @@ def news(symbol: str) -> list:
 def market_clock() -> dict:
     q = quote("SPY")
     return {"is_open": q["market_open"], "next_open_or_close": q["session_end"] if q["market_open"] else q["session_start"],
-            "session_start": q["session_start"], "session_end": q["session_end"]}
+            "session_start": q["session_start"], "session_end": q["session_end"], "session": q["session"],
+            "pre_start": q["pre_start"], "post_end": q["post_end"]}

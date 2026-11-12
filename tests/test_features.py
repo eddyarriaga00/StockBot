@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import performance  # noqa: E402
 from app.alerts import AlertError, Alerts  # noqa: E402
-from app.sim_broker import SimBroker  # noqa: E402
+from app.sim_broker import OrderError, SimBroker  # noqa: E402
 from tests.test_stockbot import FakeMarket  # noqa: E402
 
 
@@ -136,6 +136,78 @@ class AlertTests(unittest.TestCase):
         self.assertEqual(self.a.list(), [])
         with self.assertRaises(AlertError):
             self.a.remove(aid)
+
+
+class RealisticTradingTests(unittest.TestCase):
+    """Extended hours, slippage, broker-style checks and editing orders."""
+
+    def setUp(self):
+        self.m = FakeMarket()
+        self.m.install(self)
+        self.extra = {}
+        plain = self.m.quote
+
+        def quote(symbol):
+            return {**plain(symbol), **self.extra}
+        self.m.quote = quote
+        from app import market
+        market.quote = quote
+        market.quotes = lambda symbols: {s: quote(s) for s in symbols if s in self.m.prices}
+        self.b = SimBroker(os.path.join(tempfile.mkdtemp(), "sim.db"), 100_000)
+
+    def after_hours(self, price):
+        self.m.open = False
+        self.extra = {"session": "post", "ext_price": price, "ext_time": time.time(), "ext_bid": price - 0.1, "ext_ask": price + 0.1,
+                      "post_end": time.time() + 3600}
+
+    def test_extended_hours_limit_fills_after_the_close_but_a_normal_one_waits(self):
+        self.after_hours(101.0)
+        normal = self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "limit", "qty": 1, "limit_price": 105})
+        ext = self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "limit", "qty": 1, "limit_price": 105, "extended_hours": True})
+        self.assertEqual(normal["status"], "accepted")
+        self.assertEqual((ext["status"], ext["filled_avg_price"]), ("filled", 101.1))
+
+    def test_extended_hours_needs_a_fresh_price_and_a_limit_order(self):
+        self.after_hours(101.0)
+        self.extra["ext_time"] = time.time() - 3600  # nobody has traded for an hour
+        o = self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "limit", "qty": 1, "limit_price": 105, "extended_hours": True})
+        self.assertEqual(o["status"], "new")
+        with self.assertRaises(OrderError):
+            self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "market", "qty": 1, "extended_hours": True})
+
+    def test_big_market_orders_get_a_worse_price_and_small_ones_do_not(self):
+        self.extra = {"est_volume": 10_000}
+        small = self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "market", "qty": 1})
+        big = self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "market", "qty": 400})  # 4% of the day's volume
+        self.assertAlmostEqual(small["filled_avg_price"], 100.01)
+        self.assertAlmostEqual(big["filled_avg_price"], round(100.01 * (1 + 0.02 * 0.2), 4))
+        sold = self.b.place_order({"symbol": "AAPL", "side": "sell", "type": "market", "qty": 400})
+        self.assertLess(sold["filled_avg_price"], 99.99)
+
+    def test_stops_on_the_wrong_side_and_sub_penny_prices_are_refused(self):
+        self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "market", "qty": 10})
+        with self.assertRaises(OrderError):
+            self.b.place_order({"symbol": "AAPL", "side": "sell", "type": "stop", "qty": 5, "stop_price": 105})
+        with self.assertRaises(OrderError):
+            self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "stop", "qty": 5, "stop_price": 95})
+        with self.assertRaises(OrderError):
+            self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "limit", "qty": 5, "limit_price": 99.123})
+        self.assertEqual(self.b.place_order({"symbol": "AAPL", "side": "sell", "type": "stop", "qty": 5, "stop_price": 95})["status"], "new")
+
+    def test_open_orders_can_be_edited_with_the_same_checks(self):
+        self.b.place_order({"symbol": "AAPL", "side": "buy", "type": "market", "qty": 10})
+        o = self.b.place_order({"symbol": "AAPL", "side": "sell", "type": "limit", "qty": 5, "limit_price": 120, "time_in_force": "gtc"})
+        o = self.b.replace_order(o["id"], {"qty": 8, "limit_price": 115})
+        self.assertEqual((o["qty"], o["limit_price"], o["status"]), (8, 115, "new"))
+        with self.assertRaises(OrderError):
+            self.b.replace_order(o["id"], {"qty": 11})  # more than is owned
+        filled = self.b.replace_order(o["id"], {"limit_price": 99})  # now below the bid: sells right away
+        self.assertEqual(filled["status"], "filled")
+        with self.assertRaises(OrderError):
+            self.b.replace_order(o["id"], {"qty": 1})  # already done
+        buy = self.b.place_order({"symbol": "MSFT", "side": "buy", "type": "limit", "qty": 10, "limit_price": 150, "time_in_force": "gtc"})
+        with self.assertRaises(OrderError):
+            self.b.replace_order(buy["id"], {"qty": 100_000})  # can't afford it
 
 
 if __name__ == "__main__":

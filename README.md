@@ -80,6 +80,16 @@ own trades alone) against a fake market.
 
 ## Simulator rules
 Buys fill at the ask and sells at the bid. Orders placed while the market is closed queue until the open. Day orders expire at the close.
+- **Spread**: estimated from how heavily the stock trades (about a cent for the busiest stocks, up to 1% for thin ones), doubled in
+  the first five minutes after the open and four times wider outside regular hours.
+- **Pre-market and after hours** (4:00 AM to 8:00 PM ET): the quote shows the extended-hours price, and a limit order can opt in
+  to trade then. It fills only at its limit or better, and only against a price from the last 15 minutes.
+- **Slippage**: a market, stop or trailing-stop order bigger than 0.05% of the day's volume gets a worse price, growing with
+  the square root of its share of volume and capped at 3%.
+- **Order checks**: a sell stop must be below the market and a buy stop above it; prices of $1 or more can't use fractions of a cent.
+- **Editing**: open orders can have their quantity and prices changed (Portfolio → Open orders → Edit), with the same checks as a new order.
+- The order ticket shows live bid, ask and spread, 25/50/75/Max buttons, and cautions before you submit (order too big for the
+  stock, limit that fills at once, likely typo, wide spread, too much in one stock). The app shows a notice when any order fills, expires or is rejected.
 It's a cash account: no margin and no shorting. Prices come from Yahoo Finance; bid/ask are estimated.
 Dividends are added as cash on the ex-dividend date (a real broker pays a few weeks later). Stock splits change the share count
 and average cost and cancel that stock's open orders. Both are checked every 30 minutes and before every bot rebalance.

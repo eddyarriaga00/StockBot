@@ -84,6 +84,8 @@ class AlpacaBroker:
         for k in ("qty", "notional", "limit_price", "stop_price", "trail_percent"):
             if req.get(k) not in (None, ""):
                 body[k] = str(req[k])
+        if req.get("extended_hours"):
+            body["extended_hours"] = True
         tp, sl = req.get("take_profit"), req.get("stop_loss")
         if tp or sl:
             body["order_class"] = "bracket" if tp and sl else "oto"
@@ -96,6 +98,11 @@ class AlpacaBroker:
         o = _map_order(self._req("POST", "/v2/orders", body))
         o["source"], o["reason"] = source, reason
         return o
+
+    def replace_order(self, oid, changes):
+        body = {{"trail_percent": "trail"}.get(k, k): str(changes[k]) for k in ("qty", "limit_price", "stop_price", "trail_percent")
+                if changes.get(k) not in (None, "")}
+        return _map_order(self._req("PATCH", f"/v2/orders/{oid}", body))
 
     def cancel_order(self, oid):
         self._req("DELETE", f"/v2/orders/{oid}")
@@ -128,6 +135,7 @@ def _map_order(o):
         "filled_qty": _f(o.get("filled_qty")) or 0, "filled_avg_price": _f(o.get("filled_avg_price")),
         "created_at": _ts(o.get("created_at")), "updated_at": _ts(o.get("updated_at")), "filled_at": _ts(o.get("filled_at")),
         "source": "bot" if cid.startswith("bot-") else "manual", "reason": None, "reject_reason": None,
+        "extended_hours": 1 if o.get("extended_hours") else 0,
     }
 
 

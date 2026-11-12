@@ -330,6 +330,14 @@ def api_place(req: dict = Body(...)):
         _err(e)
 
 
+@app.patch("/api/orders/{oid}")
+def api_replace(oid: str, changes: dict = Body(...)):
+    try:
+        return get_broker().replace_order(oid, changes)
+    except OrderError as e:
+        _err(e)
+
+
 @app.delete("/api/orders/{oid}")
 def api_cancel(oid: str):
     try:
