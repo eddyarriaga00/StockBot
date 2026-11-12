@@ -828,7 +828,7 @@ async function refreshTrack() {
   const span = t.days < 14 ? `${t.days} day${t.days === 1 ? "" : "s"}` : t.days < 70 ? `${Math.floor(t.days / 7)} weeks` : `${(t.days / 30.4).toFixed(1)} months`;
   const num = (v) => v == null ? "—" : `<span class="${cls(v)}">${pct(v)}</span>`;
   $("#track-kpis").innerHTML = [
-    ["Running for", `${span} <span class="muted small">day ${t.days}</span>`],
+    ["Running for", t.days < 14 ? span : `${span} <span class="muted small">day ${t.days}</span>`],
     ["Trading days", `${t.trading_days}`],
     ["StockBot was running", `${t.covered_days} of ${t.trading_days} days${t.missed_days.length ? ` <span class="down small">${t.missed_days.length} missed</span>` : ""}`],
     ["Since the start", num(t.ret)], ["S&P 500, same time", num(t.spy_ret)],
