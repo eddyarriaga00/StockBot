@@ -236,10 +236,14 @@ async function refreshQuote() {
   $("#q-exchange").textContent = q.exchange || "";
   $("#q-price").textContent = money(q.price);
   $("#q-change").innerHTML = `<span class="${cls(q.change)}">${signed(q.change)} (${pct(q.change_pct)})</span> <span class="muted small">Today</span>`;
-  $("#q-session").textContent = SNAPSHOT ? "Price as of the last website update" : q.market_open ? "Market open · live" : "Market closed · last price";
+  const extName = q.session === "pre" ? "Pre-market" : "After hours";
+  $("#q-ext").innerHTML = q.ext_price && !q.market_open
+    ? `<span class="muted">${extName}</span> <b>${money(q.ext_price)}</b> <span class="${cls(q.ext_change)}">${signed(q.ext_change)} (${pct(q.ext_change_pct)})</span>` : "";
+  $("#q-session").textContent = SNAPSHOT ? "Price as of the last website update" : q.market_open ? "Market open · live"
+    : q.session === "pre" ? "Pre-market · regular trading opens 9:30 AM ET" : q.session === "post" ? "After hours · regular trading has closed" : "Market closed · last price";
   const stats = [
     ["Open", money(q.open)], ["High", money(q.high)], ["Low", money(q.low)], ["Prev close", money(q.prev_close)],
-    ["Bid", money(q.bid)], ["Ask", money(q.ask)], ["Volume", big(q.volume)],
+    ["Bid", money(q.bid)], ["Ask", money(q.ask)], ["Spread", `${money(q.ask - q.bid)} (${((q.ask - q.bid) / q.price * 100).toFixed(2)}%)`], ["Volume", big(q.volume)],
     ["52-wk range", q.week52_low ? `${money(q.week52_low)} – ${money(q.week52_high)}` : "—"],
   ];
   $("#q-stats").innerHTML = stats.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
@@ -406,7 +410,7 @@ $("#chart-type").addEventListener("click", (e) => {
 const ticket = () => ({
   type: $("#o-type").value, unit: $("#o-unit").value, qty: parseFloat($("#o-qty").value),
   limit: parseFloat($("#o-limit").value), stop: parseFloat($("#o-stop").value), trail: parseFloat($("#o-trail").value),
-  tif: $("#o-tif").value, bracket: $("#o-bracket").checked, tp: parseFloat($("#o-tp").value), sl: parseFloat($("#o-sl").value),
+  tif: $("#o-tif").value, ext: $("#o-ext").checked, bracket: $("#o-bracket").checked, tp: parseFloat($("#o-tp").value), sl: parseFloat($("#o-sl").value),
 });
 
 $("#side").addEventListener("click", (e) => {
@@ -415,7 +419,7 @@ $("#side").addEventListener("click", (e) => {
   $$("#side button").forEach((x) => x.classList.toggle("active", x === b));
   renderTicket();
 });
-["#o-type", "#o-unit", "#o-bracket"].forEach((s) => $(s).addEventListener("change", renderTicket));
+["#o-type", "#o-unit", "#o-bracket", "#o-ext"].forEach((s) => $(s).addEventListener("change", renderTicket));
 $$("#ticket-form input, #ticket-form select").forEach((el) => el.addEventListener("input", updateEstimate));
 
 function renderTicket() {
@@ -429,8 +433,10 @@ function renderTicket() {
   $("#row-limit").classList.toggle("hidden", !["limit", "stop_limit"].includes(t.type));
   $("#row-stop").classList.toggle("hidden", !["stop", "stop_limit"].includes(t.type));
   $("#row-trail").classList.toggle("hidden", t.type !== "trailing_stop");
-  $("#row-bracket").classList.toggle("hidden", !buy);
-  $("#bracket-fields").classList.toggle("hidden", !(buy && t.bracket));
+  $("#row-ext").classList.toggle("hidden", t.type !== "limit");
+  const ext = t.type === "limit" && t.ext;
+  $("#row-bracket").classList.toggle("hidden", !buy || ext);
+  $("#bracket-fields").classList.toggle("hidden", !(buy && t.bracket) || ext);
   $("#review").textContent = "Review order";
   $("#review").classList.toggle("sell-mode", !buy);
   $("#submit").classList.toggle("sell-mode", !buy);
@@ -450,6 +456,10 @@ function updateEstimate() {
   const t = ticket(), q = state.quote, buy = state.side === "buy";
   if (!q) return;
   const px = estPrice(t);
+  const useExt = !q.market_open && q.ext_price && t.type === "limit" && t.ext;
+  const [bid, ask] = useExt ? [q.ext_bid, q.ext_ask] : [q.bid, q.ask];
+  $("#bidask").innerHTML = `<div><span>Bid</span><b class="down">${money(bid)}</b></div><div><span>Ask</span><b class="up">${money(ask)}</b></div>
+    <div><span>Spread</span><b>${money(ask - bid)}</b></div>` + (useExt ? `<small>${q.session === "pre" ? "Pre-market" : "After-hours"} quote</small>` : "");
   $("#est-px-label").textContent = { market: buy ? "Ask price" : "Bid price", limit: "Limit price", stop: "Stop price", stop_limit: "Limit price", trailing_stop: "Current price" }[t.type];
   $("#est-px").textContent = money(t.type === "trailing_stop" ? q.price : px);
   const dollars = t.type === "market" && t.unit === "dollars";
@@ -472,7 +482,8 @@ function buildOrder() {
   if (["limit", "stop_limit"].includes(t.type)) { if (!t.limit) throw new Error("Enter a limit price."); o.limit_price = t.limit; }
   if (["stop", "stop_limit"].includes(t.type)) { if (!t.stop) throw new Error("Enter a stop price."); o.stop_price = t.stop; }
   if (t.type === "trailing_stop") { if (!t.trail) throw new Error("Enter a trail percent."); o.trail_percent = t.trail; }
-  if (state.side === "buy" && t.bracket) {
+  if (t.type === "limit" && t.ext) o.extended_hours = true;
+  if (state.side === "buy" && t.bracket && !o.extended_hours) {
     if (t.tp) o.take_profit = t.tp;
     if (t.sl) o.stop_loss = t.sl;
   }
@@ -501,15 +512,58 @@ $("#review").addEventListener("click", () => {
   if (o.take_profit) lines.push(["Take profit", money(o.take_profit)]);
   if (o.stop_loss) lines.push(["Stop loss", money(o.stop_loss)]);
   lines.push(["Time in force", o.time_in_force === "gtc" ? "Good till canceled" : "Good for day"]);
+  if (o.extended_hours) lines.push(["Hours", "Pre-market, regular and after hours"]);
   lines.push([o.side === "buy" ? "Est. cost" : "Est. credit", o.notional ? money(o.notional) : money(px * o.qty)]);
   $("#rv-title").textContent = `${o.side === "buy" ? "Buy" : "Sell"} ${o.symbol}`;
   $("#rv-lines").innerHTML = lines.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
+  const extNow = o.extended_hours && (q.session === "pre" || q.session === "post");
   $("#rv-note").textContent = q.market_open
     ? (o.type === "market" ? "Market orders fill at the best available price, which can differ from the estimate." : "Your order will fill only if the price condition is met.")
+    : extNow ? "Extended hours: the order can fill now, but only at your limit price or better."
+    : o.extended_hours ? "Trading is closed right now. Your order will start working when pre-market opens at 4:00 AM ET."
     : "The market is closed. Your order will be queued and sent at the next market open.";
+  $("#rv-warn").innerHTML = orderWarnings(o, q).map((w) => `<p class="warn-note">${esc(w)}</p>`).join("");
   $("#submit").textContent = `Submit ${o.side === "buy" ? "buy" : "sell"}`;
   showReview(true);
 });
+// The cautions a good broker shows before you submit.
+function orderWarnings(o, q) {
+  const w = [], buy = o.side === "buy";
+  const qty = o.qty || (o.notional ? o.notional / q.ask : 0);
+  const vol = q.est_volume || q.volume;
+  if (vol && qty / vol >= 0.0005 && ["market", "stop", "trailing_stop"].includes(o.type))
+    w.push(`This order is ${(qty / vol * 100).toFixed(2)}% of a typical day's trading in ${o.symbol}, so expect a worse price than the quote. A limit order avoids that.`);
+  if (o.type === "limit" && (buy ? o.limit_price >= q.ask : o.limit_price <= q.bid) && q.market_open)
+    w.push(`Your limit is ${buy ? "at or above the ask" : "at or below the bid"}, so this will fill right away at about ${money(buy ? q.ask : q.bid)}.`);
+  if (o.type === "limit" && Math.abs(o.limit_price / q.price - 1) > 0.2)
+    w.push(`Your limit price is ${Math.abs((o.limit_price / q.price - 1) * 100).toFixed(0)}% away from the current price. Check for a typo.`);
+  if (o.type === "stop_limit" && (buy ? o.limit_price < o.stop_price : o.limit_price > o.stop_price))
+    w.push(`The limit is ${buy ? "below" : "above"} the stop, so the order may trigger and then not fill.`);
+  if ((q.ask - q.bid) / q.price > 0.005 && o.type === "market")
+    w.push(`${o.symbol} has a wide spread (${((q.ask - q.bid) / q.price * 100).toFixed(2)}%). A market order pays that gap.`);
+  if (o.extended_hours) w.push("Outside regular hours fewer people trade: prices jump more and the gap between bid and ask is wider.");
+  if (buy && state.account && (o.notional || qty * q.ask) > state.account.equity * 0.25)
+    w.push(`This would put more than 25% of the account in one stock.`);
+  return w;
+}
+
+$("#quick").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pct]"); if (!b || !state.quote) return;
+  const f = +b.dataset.pct / 100, t = ticket(), q = state.quote, buy = state.side === "buy";
+  const whole = t.type !== "market";
+  let v;
+  if (buy) {
+    const cash = (state.account?.buying_power || 0) * f * (f === 1 ? 0.995 : 1);  // leave room for the price to tick up
+    const px = estPrice(t) || q.ask;
+    v = t.type === "market" && t.unit === "dollars" ? Math.floor(cash * 100) / 100 : whole ? Math.floor(cash / px) : Math.floor(cash / px * 1e4) / 1e4;
+  } else {
+    const have = state.positions.find((p) => p.symbol === state.symbol)?.qty || 0;
+    v = t.type === "market" && t.unit === "dollars" ? Math.floor(have * f * q.bid * 100) / 100 : whole ? Math.floor(have * f) : f === 1 ? have : Math.floor(have * f * 1e4) / 1e4;
+  }
+  $("#o-qty").value = v > 0 ? v : "";
+  updateEstimate();
+});
+
 $("#edit").addEventListener("click", () => showReview(false));
 $("#submit").addEventListener("click", async () => {
   let o;
@@ -517,6 +571,7 @@ $("#submit").addEventListener("click", async () => {
   $("#submit").disabled = true;
   try {
     const r = await api("/api/orders", { method: "POST", body: o });
+    knownDone.add(r.id);
     const desc = `${r.side === "buy" ? "Bought" : "Sold"} ${shares(r.filled_qty)} ${r.symbol} at ${money(r.filled_avg_price)}`;
     toast(r.status === "filled" ? desc : `${TYPE_NAMES[r.type]} ${r.side} order for ${r.symbol} placed (${r.status === "accepted" ? "queued" : "open"}).`, "ok");
     $("#o-qty").value = "";
@@ -572,12 +627,13 @@ async function renderPortfolio() {
     acts.map((x) => `<tr><td>${new Date(x.time * 1000).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</td>
       <td><b>${esc(x.symbol)}</b></td><td>${esc(x.note)}</td><td class="r ${x.amount ? "up" : ""}">${x.amount ? "+" + money(x.amount) : "—"}</td></tr>`).join("");
   const orderRow = (o, canCancel) => `<tr><td>${when(o.created_at)}</td><td><b>${o.symbol}</b></td>
-    <td>${o.side === "buy" ? "Buy" : "Sell"} · ${TYPE_NAMES[o.type] || o.type}${o.source === "bot" ? ' <span class="tag bot">bot</span>' : ""}</td>
+    <td>${o.side === "buy" ? "Buy" : "Sell"} · ${TYPE_NAMES[o.type] || o.type}${o.source === "bot" ? ' <span class="tag bot">bot</span>' : ""}${o.extended_hours ? ' <span class="tag" title="Can trade pre-market and after hours">ext</span>' : ""}</td>
     <td class="r">${o.notional ? money(o.notional) : shares(o.qty)}</td>
     <td class="r">${o.limit_price ? "L " + money(o.limit_price) : ""} ${o.stop_price ? "S " + money(o.stop_price) : ""} ${o.trail_percent ? o.trail_percent + "%" : ""}</td>
     <td class="r">${o.filled_avg_price ? shares(o.filled_qty) + " @ " + money(o.filled_avg_price) : "—"}</td>
     <td><span class="tag ${o.status}">${o.status === "accepted" ? "queued" : o.status}</span>${o.reject_reason ? ` <span class="muted small">${esc(o.reject_reason)}</span>` : ""}</td>
-    <td class="r">${canCancel ? `<button class="ghost small" data-cancel="${o.id}">Cancel</button>` : ""}</td></tr>`;
+    <td class="r nowrap">${canCancel ? `${o.notional ? "" : `<button class="ghost small" data-edit="${o.id}">Edit</button> `}<button class="ghost small" data-cancel="${o.id}">Cancel</button>` : ""}</td></tr>`;
+  state.openOrders = open;
   const head = `<tr><th>Placed</th><th>Symbol</th><th>Order</th><th class="r">Qty</th><th class="r">Prices</th><th class="r">Filled</th><th>Status</th><th></th></tr>`;
   $("#open-orders").innerHTML = open.length ? head + open.map((o) => orderRow(o, true)).join("") : `<tr><td class="empty">No open orders.</td></tr>`;
   $("#order-history").innerHTML = hist.length ? head + hist.map((o) => orderRow(o, false)).join("") : `<tr><td class="empty">No orders yet.</td></tr>`;
@@ -610,6 +666,8 @@ function renderPerformance(p) {
 
 $("#view-portfolio").addEventListener("click", async (e) => {
   const c = e.target.closest("[data-cancel]"), cl = e.target.closest("[data-close]"), row = e.target.closest("tr[data-s]");
+  const ed = e.target.closest("[data-edit]");
+  if (ed) return openEditOrder((state.openOrders || []).find((o) => o.id === ed.dataset.edit));
   try {
     if (c) { await api(`/api/orders/${c.dataset.cancel}`, { method: "DELETE" }); toast("Order canceled", "ok"); return refreshAccount(); }
     if (cl) {
@@ -619,6 +677,54 @@ $("#view-portfolio").addEventListener("click", async (e) => {
     if (row) selectSymbol(row.dataset.s);
   } catch (err) { toast(err.message, "bad"); }
 });
+// ---------- edit an open order ----------
+let editing = null;
+function openEditOrder(o) {
+  if (!o) return;
+  editing = o;
+  $("#eo-title").textContent = `Edit ${o.side} order · ${o.symbol}`;
+  $("#eo-sub").textContent = `${TYPE_NAMES[o.type] || o.type} order placed ${when(o.created_at)}. Changes take effect right away.`;
+  $("#eo-qty").value = o.qty; $("#eo-qty").step = o.type === "market" ? "any" : "1";
+  $("#eo-limit").value = o.limit_price ?? ""; $("#eo-stop").value = o.stop_price ?? ""; $("#eo-trail").value = o.trail_percent ?? "";
+  $("#eo-row-limit").classList.toggle("hidden", !["limit", "stop_limit"].includes(o.type));
+  $("#eo-row-stop").classList.toggle("hidden", !["stop", "stop_limit"].includes(o.type));
+  $("#eo-row-trail").classList.toggle("hidden", o.type !== "trailing_stop");
+  $("#edit-order").showModal();
+}
+$("#edit-order").addEventListener("close", async () => {
+  const o = editing; editing = null;
+  if (!o || $("#edit-order").returnValue !== "save") return;
+  const body = { qty: $("#eo-qty").value };
+  if (["limit", "stop_limit"].includes(o.type)) body.limit_price = $("#eo-limit").value;
+  if (["stop", "stop_limit"].includes(o.type)) body.stop_price = $("#eo-stop").value;
+  if (o.type === "trailing_stop") body.trail_percent = $("#eo-trail").value;
+  try {
+    const r = await api(`/api/orders/${o.id}`, { method: "PATCH", body });
+    if (r.status === "filled") knownDone.add(r.id);
+    toast(r.status === "filled" ? `Order updated and filled at ${money(r.filled_avg_price)}` : "Order updated", "ok");
+  } catch (err) { toast(err.message, "bad"); }
+  refreshAccount();
+});
+
+// ---------- notices when orders finish ----------
+const knownDone = new Set();
+let fillsPrimed = false;
+async function watchFills() {
+  if (SNAPSHOT) return;
+  const done = await api("/api/orders?status=closed").catch(() => null);
+  if (!done) return;
+  const fresh = done.filter((o) => !knownDone.has(o.id));
+  done.forEach((o) => knownDone.add(o.id));
+  if (!fillsPrimed) { fillsPrimed = true; return; }
+  fresh.slice(0, 6).reverse().forEach((o) => {
+    const who = o.source === "bot" ? "Bot " : "";
+    if (o.status === "filled") toast(`${who}${o.side === "buy" ? (who ? "bought" : "Bought") : (who ? "sold" : "Sold")} ${shares(o.filled_qty)} ${o.symbol} at ${money(o.filled_avg_price)}`, "ok");
+    else if (o.status === "expired") toast(`Your ${o.symbol} ${o.side} order expired without filling.`, "");
+    else if (o.status === "rejected") toast(`${o.symbol} ${o.side} order rejected: ${o.reject_reason || "no reason given"}`, "bad");
+  });
+  if (fresh.length) refreshAccount();
+}
+
 $("#cancel-all").addEventListener("click", async () => {
   if (!confirm("Cancel all open orders?")) return;
   await api("/api/orders", { method: "DELETE" }); toast("All open orders canceled", "ok"); refreshAccount();
@@ -981,6 +1087,7 @@ async function refreshClock() {
   setInterval(refreshWatchlist, 10000);
   setInterval(refreshAccount, 10000);
   refreshAlerts(); setInterval(refreshAlerts, 15000);
+  watchFills(); setInterval(watchFills, 8000);
   setInterval(refreshBot, 15000);
   setInterval(() => { if (state.view === "bot") refreshTournament(); }, 60000);
   setInterval(refreshClock, 60000);

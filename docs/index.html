@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StockBot</title>
   <meta name="description" content="StockBot: a trading bot that runs a live tournament of strategies on fake money. Watch its trades, charts, and results.">
-  <link rel="stylesheet" href="static/style.css?v=11">
+  <link rel="stylesheet" href="static/style.css?v=12">
   <script src="static/vendor/lightweight-charts.js"></script>
 </head>
 <body>
@@ -61,6 +61,7 @@
         <div class="price-block">
           <div id="q-price" class="big">—</div>
           <div id="q-change"></div>
+          <div id="q-ext" class="small"></div>
           <div id="q-session" class="muted small"></div>
         </div>
       </div>
@@ -111,6 +112,7 @@
       <button data-side="buy" class="active buy">Buy</button><button data-side="sell" class="sell">Sell</button>
     </div>
     <div id="ticket-form">
+      <div class="bidask" id="bidask"></div>
       <label>Order type
         <select id="o-type">
           <option value="market">Market</option>
@@ -128,12 +130,14 @@
       <label><span id="qty-label">Shares</span>
         <input id="o-qty" type="number" min="0" step="any" placeholder="0">
       </label>
+      <div class="quick" id="quick"><button type="button" data-pct="25">25%</button><button type="button" data-pct="50">50%</button><button type="button" data-pct="75">75%</button><button type="button" data-pct="100">Max</button></div>
       <label id="row-limit" class="hidden">Limit price<input id="o-limit" type="number" step="0.01" placeholder="$0.00"></label>
       <label id="row-stop" class="hidden">Stop price<input id="o-stop" type="number" step="0.01" placeholder="$0.00"></label>
       <label id="row-trail" class="hidden">Trail %<input id="o-trail" type="number" step="0.1" placeholder="5"></label>
       <label id="row-tif">Time in force
         <select id="o-tif"><option value="day">Good for day</option><option value="gtc">Good till canceled</option></select>
       </label>
+      <label class="check hidden" id="row-ext" title="Pre-market runs 4:00 to 9:30 AM ET and after hours 4:00 to 8:00 PM ET"><input type="checkbox" id="o-ext"> Also trade pre-market and after hours</label>
       <label class="check" id="row-bracket"><input type="checkbox" id="o-bracket"> Add take-profit / stop-loss</label>
       <div id="bracket-fields" class="hidden two">
         <label>Take profit<input id="o-tp" type="number" step="0.01" placeholder="$"></label>
@@ -150,6 +154,7 @@
       <h3 id="rv-title">Review</h3>
       <div id="rv-lines" class="review-lines"></div>
       <p id="rv-note" class="muted small"></p>
+      <div id="rv-warn"></div>
       <button id="submit" class="primary full">Submit order</button>
       <button id="edit" class="ghost full">Edit</button>
     </div>
@@ -316,8 +321,19 @@
   </div>
 </main>
 
+<dialog id="edit-order">
+  <form method="dialog" id="edit-order-form">
+    <h3 id="eo-title">Edit order</h3>
+    <p id="eo-sub" class="muted small"></p>
+    <label>Shares<input id="eo-qty" type="number" min="0" step="any"></label>
+    <label id="eo-row-limit">Limit price<input id="eo-limit" type="number" step="0.01"></label>
+    <label id="eo-row-stop">Stop price<input id="eo-stop" type="number" step="0.01"></label>
+    <label id="eo-row-trail">Trail %<input id="eo-trail" type="number" step="0.1"></label>
+    <div class="row"><button class="primary" id="eo-save" value="save">Save changes</button><button class="ghost" value="cancel" formnovalidate>Keep as is</button></div>
+  </form>
+</dialog>
 <div id="toasts"></div>
-<script src="static/app.js?v=11"></script>
+<script src="static/app.js?v=12"></script>
 <script src="static/learn.js?v=1"></script>
 </body>
 </html>
