@@ -87,6 +87,7 @@ def get_broker():
     return _brokers[cache_key]
 
 
+strategy.CACHE_PATH = os.path.join(DATA, "backtest.json")
 tournament = Tournament(DATA)
 bot = Bot(DATA, get_broker, load_settings, get_champion=tournament.champion)
 publisher = Publisher(ROOT, get_broker, bot, tournament, load_settings, bot.log, get_remote_url=lambda: remote.url)

@@ -201,9 +201,29 @@ def history(symbol: str, rng: str = "1d") -> dict:
 
 
 def daily_closes(symbol: str, rng: str = "2y") -> list:
-    """Daily candles used by the strategy engine and backtester."""
+    """Daily candles used by the strategy engine and backtester. Each has "adj": the close adjusted for
+    dividends and splits, so returns measured on it include dividends (total return)."""
     symbol = symbol.upper()
-    return _cached(f"d:{symbol}:{rng}", 3600, lambda: _candles(_chart(symbol, rng, "1d")))
+
+    def load():
+        if rng == "long":  # everything since 1990: Yahoo's own "max" range only returns monthly prices
+            q = urllib.parse.urlencode({"period1": 631152000, "period2": int(time.time()), "interval": "1d"})
+            data = _get_json(f"{BASE}/v8/finance/chart/{urllib.parse.quote(symbol)}?{q}", timeout=30)
+            result = (data.get("chart") or {}).get("result")
+            if not result:
+                raise MarketDataError(f"No data for {symbol}")
+            res = result[0]
+        else:
+            res = _chart(symbol, rng, "1d")
+        ts = res.get("timestamp") or []
+        adj = (((res.get("indicators") or {}).get("adjclose") or [{}])[0].get("adjclose")) or []
+        by_time = {t: a for t, a in zip(ts, adj) if a is not None}
+        out = _candles(res)
+        for c in out:
+            c["adj"] = by_time.get(c["time"], c["close"])
+        return out
+
+    return _cached(f"d:{symbol}:{rng}", 3600, load)
 
 
 def corporate_actions(symbol: str) -> list:

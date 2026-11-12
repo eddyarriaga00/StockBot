@@ -16,8 +16,9 @@ from .bot import Bot
 from .sim_broker import SimBroker
 
 LIVE_DAYS = 60        # about 3 months of trading days before live results take over
-RULE_VERSION = 2      # bump when the champion rule changes so it's re-picked right away
+RULE_VERSION = 4      # bump when the champion rule changes so it's re-picked right away
 REVIEW_EVERY = 7 * 86400
+TIE = 0.25            # honest-Sharpe gap that counts as a tie (see review)
 
 
 class Tournament:
@@ -93,11 +94,13 @@ class Tournament:
                 "trades": sum(1 for o in e["broker"].orders("closed", 10000) if o["status"] == "filled"),
                 "holdings": [{"symbol": p["symbol"], "weight": p["market_value"] / acct["equity"] * 100} for p in e["broker"].positions()],
                 "bt_oos": b["oos"], "bt_full": b["full"], "bt_checked": b["checked"]["full"], "beats_spy_oos": b["beats_spy_oos"],
+                "bt_robust": b.get("robust"), "bt_stress": b.get("stress"), "honest_sharpe": b.get("honest_sharpe"),
                 "champion": key == self.champion(),
             })
         return {"champion": self.champion(), "reason": self.state["champion_reason"], "live_days_needed": LIVE_DAYS,
                 "history": self.state["history"][-20:], "rows": rows, "backtest_period": {k: bt[k] for k in ("start", "split", "end")},
-                "caveat": bt["caveat"]}
+                "caveat": bt["caveat"],
+                "stress_windows": bt.get("stress_windows") or [], "stress_start": bt.get("stress_start"), "subsets": bt.get("subsets")}
 
     def champion(self):
         if not self.state["champion"]:
@@ -121,9 +124,16 @@ class Tournament:
             best_ret, best = max(scored)
             reason = f"Best live paper return ({best_ret:+.1f}%) over {LIVE_DAYS}+ trading days without a much worse drop than SPY."
         else:
-            best_sharpe, best = max((v["checked"]["full"]["sharpe"], k) for k, v in bt.items())
-            reason = (f"Best risk-adjusted 10-year backtest (Sharpe {best_sharpe:.2f}) even without the biggest "
-                      f"hindsight winners. Live paper results take over after {LIVE_DAYS} trading days.")
+            # Honest Sharpe = the weakest of three tests (no hindsight winners, random halves of the stock list, 30 years
+            # of history). A Sharpe ratio measured over ~9 years is only known to about +/-0.33, and the gap between two
+            # strategies that move together to about +/-0.25, so anything within TIE of the best is a statistical tie.
+            # Among the tied leaders, take the higher honest return.
+            top = max(v["honest_sharpe"] for v in bt.values())
+            tied = [k for k, v in bt.items() if v["honest_sharpe"] >= top - TIE]
+            best = max(tied, key=lambda k: bt[k]["checked"]["full"]["cagr"])
+            reason = (f"Held up best across three honest backtests (weakest Sharpe {bt[best]['honest_sharpe']:.2f}; "
+                      f"{bt[best]['checked']['full']['cagr']:.1f}%/yr without the biggest hindsight winners). "
+                      f"Live paper results take over after {LIVE_DAYS} trading days.")
         with self.lock:
             prev = self.state["champion"]
             self.state.update(champion=best, champion_reason=reason, reviewed=time.time())

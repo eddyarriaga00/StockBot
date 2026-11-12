@@ -13,10 +13,17 @@ Strategies (all well-known, published styles, not secret edges):
                     with a "keep what's working" bonus so it doesn't churn. T-bills when SPY < 200-day.
 - momentum_max:     same engine, only the top 4. Highest backtested return, bigger single-stock risk.
 - nasdaq_2x:        2x Nasdaq-100 (QLD) while the Nasdaq is above its 200-day avg and calm, T-bills otherwise.
+- high_52w:         6 uptrending stocks closest to their 52-week high (George & Hwang 2004), kept until they slip
+                    out of the top 12. Lowest drawdown of the stock pickers in testing.
+- core_blend:       equal parts Momentum Max, Trend Momentum and 52-Week High. Three different ways of measuring
+                    "winning", so no single rule's bad luck decides the result.
 - spy_hold:         just hold SPY. The baseline every other strategy has to beat.
 """
 import copy
+import json
 import math
+import os
+import random
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -49,7 +56,8 @@ class Context:
         self.n = len(self.dates)
         self.closes, self.first, self.cum = {}, {}, {}
         for s, candles in raw.items():
-            by_day = {c["time"] // 86400 * 86400: c["close"] for c in candles}
+            # Dividend-adjusted closes: a backtest that ignores dividends shortchanges SPY, bonds and T-bills the most.
+            by_day = {c["time"] // 86400 * 86400: c.get("adj") or c["close"] for c in candles}
             col, last, first = [], None, None
             for i, d in enumerate(self.dates):
                 v = by_day.get(d)
@@ -258,6 +266,41 @@ def momentum_max(ctx, i, holdings):
     return _momentum_top(ctx, i, holdings, 4)
 
 
+def high_52w(ctx, i, holdings, n=6):
+    """Stocks trading closest to their 52-week high. Momentum only breaks ties; holdings stay until they drop out of the top 2n."""
+    if not ctx.risk_on(i):
+        return {SAFE: 1.0}, {SAFE: "SPY below its 200-day average: risk-off, holding T-bills"}
+    scored = []
+    for s in ctx.universe:
+        p, s200 = ctx.px(s, i), ctx.sma(s, i, 200)
+        m, _ = _blended_momentum(ctx, s, i)
+        if None in (p, s200, m) or p < s200 or not ctx.has(s, i, 252):
+            continue
+        near = p / max(ctx.closes[s][i - 252:i + 1])
+        scored.append((near + 0.02 * m, s, near))
+    scored.sort(reverse=True)
+    keep = [s for _, s, _ in scored[:n * 2] if s in holdings][:n]
+    picks = keep + [s for _, s, _ in scored if s not in keep][:n - len(keep)]
+    near = {s: x for _, s, x in scored}
+    notes = {s: ("At its 52-week high" if near[s] > 0.999 else f"{(1 - near[s]) * 100:.1f}% below its 52-week high")
+             + (" (kept)" if s in holdings else "") for s in picks}
+    return {s: 1 / n for s in picks}, notes
+
+
+BLEND = ("momentum_max", "trend_momentum", "high_52w")
+
+
+def core_blend(ctx, i, holdings):
+    weights, notes = {}, {}
+    for key in BLEND:
+        w, why = STRATEGIES[key]["fn"](ctx, i, holdings)
+        for s, x in finalize(key, w, reserve=0.0).items():
+            weights[s] = weights.get(s, 0) + x / len(BLEND)
+            if s in why:
+                notes.setdefault(s, []).append(STRATEGIES[key]["name"])
+    return weights, {s: "Picked by " + " + ".join(v) for s, v in notes.items()}
+
+
 def nasdaq_2x(ctx, i, holdings):
     p, s200, v = ctx.px(NASDAQ, i), ctx.sma(NASDAQ, i, 200), ctx.vol(NASDAQ, i, 21)
     if None in (p, s200, v) or not ctx.has(NASDAQ_2X, i):
@@ -291,6 +334,10 @@ STRATEGIES = {
                      "about": "Top 4 momentum stocks, checked weekly. Highest backtested return; each stock is 25% of the account."},
     "nasdaq_2x": {"name": "Nasdaq 2x Trend", "fn": nasdaq_2x, "rebalance_days": 5, "fill_spy": False, "max_w": 1.0,
                   "about": "2x Nasdaq-100 (QLD) while the Nasdaq is above its 200-day and calm; T-bills otherwise. High risk."},
+    "high_52w": {"name": "52-Week High", "fn": high_52w, "rebalance_days": 5, "fill_spy": False, "max_w": 0.17,
+                 "about": "6 uptrending stocks closest to their 52-week high, checked weekly. Smallest drops of the stock pickers in testing."},
+    "core_blend": {"name": "Core Blend", "fn": core_blend, "rebalance_days": 5, "fill_spy": False, "max_w": 0.25,
+                   "about": "Equal parts Momentum Max, Trend Momentum and 52-Week High: three signals, so one rule's bad luck matters less."},
     "spy_hold": {"name": "Hold SPY (baseline)", "fn": spy_hold, "rebalance_days": 63, "fill_spy": False, "max_w": 1.0,
                  "about": "Buy and hold the S&P 500. Every strategy must beat this to be worth it."},
 }
@@ -319,6 +366,24 @@ def targets(key, holdings, reserve=0.02, max_stock_w=None):
 
 # ---------- backtest ----------
 _bt_cache = {"time": 0, "result": None}
+CACHE_PATH = None   # set by the app: where the last backtest is kept so a restart doesn't have to redo it
+BT_VERSION = 3
+STRESS = [("Dot-com bust 2000-02", "2000-03-24", "2002-10-09"), ("2008 crisis", "2007-10-09", "2009-03-09"),
+          ("Covid crash 2020", "2020-02-19", "2020-03-23"), ("2022 bear market", "2022-01-03", "2022-10-12")]
+SUBSETS = 20        # random halves of the stock list used for the luck check
+
+
+def _load_saved():
+    if not CACHE_PATH or not os.path.exists(CACHE_PATH):
+        return None
+    try:
+        with open(CACHE_PATH) as f:
+            saved = json.load(f)
+    except (ValueError, OSError):
+        return None
+    ok = saved.get("version") == BT_VERSION and sorted(saved["result"]["strategies"]) == sorted(STRATEGIES) \
+        and time.time() - saved["time"] < 86400
+    return saved if ok else None
 
 
 def backtest_all(years="10y", cost=0.0005, force=False):
@@ -326,6 +391,10 @@ def backtest_all(years="10y", cost=0.0005, force=False):
     out-of-sample: it's the closest thing to 'how would this have done on data it wasn't tuned on'."""
     if not force and _bt_cache["result"] and time.time() - _bt_cache["time"] < 86400:
         return _bt_cache["result"]
+    saved = None if force else _load_saved()
+    if saved:
+        _bt_cache.update(time=saved["time"], result=saved["result"])
+        return saved["result"]
     ctx = load_context(years)
     start = 252
     split = start + int((ctx.n - start) * 0.6)
@@ -344,15 +413,75 @@ def backtest_all(years="10y", cost=0.0005, force=False):
     for key, r in out.items():
         c = _run(checked_ctx, key, start, split, cost)
         r["checked"] = {"full": c["full"], "oos": c["oos"]}
-    result = {"strategies": out, "start": ctx.dates[start], "split": ctx.dates[split], "end": ctx.dates[-1],
+    # Luck check: the same strategies on random halves of the stock list. A real edge shouldn't depend on which names are allowed.
+    rng = random.Random(7)
+    halves = []
+    for _ in range(SUBSETS):
+        c = copy.copy(ctx)
+        c.stocks = rng.sample(STOCKS, len(STOCKS) * 3 // 5)
+        halves.append(c)
+    spy_cagr = spy["full"]["cagr"]
+    for key, r in out.items():
+        runs = [_run(c, key, start, split, cost)["full"] for c in halves] if key not in FIXED else [r["full"]]
+        med = lambda f: sorted(x[f] for x in runs)[len(runs) // 2]  # noqa: E731
+        r["robust"] = {"cagr": med("cagr"), "sharpe": med("sharpe"), "max_drawdown": med("max_drawdown"),
+                       "beat_spy_pct": sum(1 for x in runs if x["cagr"] > spy_cagr) / len(runs) * 100}
+    # Crash test: the same rules through every bear market since the 1990s (stocks join as they come to market).
+    stress_windows = []
+    try:
+        long_ctx = load_context("long")
+        for key, r in out.items():
+            lr = _run(long_ctx, key, start, start + 1, cost, keep=True)
+            eq, d0 = lr["equity"], start
+            wins = []
+            for name, a, b in STRESS:
+                ia, ib = _index_of(long_ctx, a), _index_of(long_ctx, b)
+                if ia is None or ib is None or ia < d0:
+                    wins.append(None)
+                    continue
+                seg = eq[ia - d0:ib - d0 + 1]
+                peak, dd = seg[0], 0.0
+                for v in seg:
+                    peak = max(peak, v)
+                    dd = min(dd, v / peak - 1)
+                wins.append({"ret": (seg[-1] / seg[0] - 1) * 100, "drop": dd * 100})
+            r["stress"] = {"full": lr["full"], "windows": wins}
+        stress_windows = [n for n, _, _ in STRESS]
+        stress_start = long_ctx.dates[start]
+    except Exception:  # the long history is a bonus: never let it break the main backtest
+        stress_start = None
+        for r in out.values():
+            r.setdefault("stress", None)
+    for r in out.values():
+        views = [r["checked"]["full"]["sharpe"], r["robust"]["sharpe"]] + ([r["stress"]["full"]["sharpe"]] if r.get("stress") else [])
+        r["honest_sharpe"] = min(views)   # a strategy is only as good as its weakest honest test
+    result = {"strategies": out, "stress_windows": stress_windows, "stress_start": stress_start, "subsets": SUBSETS,
+              "start": ctx.dates[start], "split": ctx.dates[split], "end": ctx.dates[-1],
               "hindsight_winners": winners,
               "caveat": "Backtests use today's well-known large caps (survivorship bias) and can't capture everything, "
                         "so real results will likely be worse. Live paper results decide the champion once they exist."}
     _bt_cache.update(time=time.time(), result=result)
+    if CACHE_PATH:
+        try:
+            with open(CACHE_PATH, "w") as f:
+                json.dump({"version": BT_VERSION, "time": _bt_cache["time"], "result": result}, f)
+        except OSError:
+            pass
     return result
 
 
-def _run(ctx, key, start, split, cost):
+FIXED = {"spy_hold", "dual_momentum", "sector_rotation", "nasdaq_2x"}  # trade ETFs only: the stock list doesn't matter
+
+
+def _index_of(ctx, day):
+    t = time.mktime(time.strptime(day, "%Y-%m-%d"))
+    for i, d in enumerate(ctx.dates):
+        if d >= t:
+            return i
+    return None
+
+
+def _run(ctx, key, start, split, cost, keep=False):
     st = STRATEGIES[key]
     holdings, equity, trades = {}, [1.0], 0
     for i in range(start, ctx.n - 1):
@@ -375,6 +504,8 @@ def _run(ctx, key, start, split, cost):
             tot = sum(grown.values()) + (1 - sum(holdings.values()))
             holdings = {s: v / tot for s, v in grown.items()}
     k = split - start
+    if keep:
+        return {"full": _stats(equity), "equity": equity}
     return {
         "key": key, "name": st["name"], "about": st["about"], "trades": trades,
         "full": _stats(equity), "in_sample": _stats(equity[: k + 1]), "oos": _stats(equity[k:]),

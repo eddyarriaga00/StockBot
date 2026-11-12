@@ -61,24 +61,45 @@ Discord announces the ones that stay met once reached. Meeting all seven is a tr
 `app/calendar_us.py` knows US market holidays, so they don't count as trading days or as missed days.
 
 ## How the bot decides: a strategy tournament
-Nine strategies each trade their own fake $100,000 on live prices, side by side:
-Momentum Max, Momentum Weekly, Nasdaq 2x Trend, Trend Momentum, Concentrated Momentum, Dual Momentum, Sector Rotation, Dip Buyer, and Hold SPY (the baseline to beat). Momentum Max and Momentum Weekly rank stocks on blended 3/6/12-month risk-adjusted momentum, check every week, and keep current winners unless something is clearly stronger.
-The same code runs the 10-year backtest and the live trading, so there's no gap between what was tested and what trades.
+Eleven strategies each trade their own fake $100,000 on live prices, side by side:
+Momentum Max, Momentum Weekly, 52-Week High, Core Blend, Nasdaq 2x Trend, Trend Momentum, Concentrated Momentum, Dual Momentum,
+Sector Rotation, Dip Buyer, and Hold SPY (the baseline to beat).
+- **Momentum Max / Weekly** rank stocks on blended 3/6/12-month risk-adjusted momentum, check every week, and keep current
+  winners unless something is clearly stronger.
+- **52-Week High** holds the 6 uptrending stocks closest to their 52-week high (George & Hwang, 2004).
+- **Core Blend** is equal parts Momentum Max, Trend Momentum and 52-Week High, so one rule's bad luck matters less.
+
+The same code runs the backtest and the live trading, so there's no gap between what was tested and what trades.
+Backtests use dividend-adjusted prices (total return). Ignoring dividends used to make SPY look about 2% a year worse than it is.
 
 Your account follows the **champion** (or a strategy you pick):
-- Until there are 60 trading days of live paper results, the champion is the best **honest backtest**, ranked by Sharpe ratio.
-  The stock list is today's giants, so a plain backtest "knows" who won. The honest backtest re-runs every strategy
-  without the 6 stocks that rose the most (picked by the data, e.g. NVDA, AVGO, AMD, TSLA, LLY, AAPL).
-  Momentum Max goes from 26.7%/yr to 15.0%/yr under that check: still ahead of SPY (12.4%/yr) with a much smaller
-  worst drop (−19% vs −33%), but the headline number is mostly hindsight. Both numbers are in the tournament table.
+- Until there are 60 trading days of live paper results, the champion comes from three **honest backtests**. The stock list is
+  today's giants, so a plain backtest "knows" who won. Each strategy is re-run (1) without the 6 stocks that rose the most,
+  (2) on 20 random halves of the stock list, and (3) over 30 years of history. Its **honest Sharpe** is the weakest of the three.
+  Nine years of data can't tell Sharpe ratios within 0.25 of each other apart, so among those tied leaders the champion is the one with the higher return without the winners.
+  Momentum Max goes from 25.7%/yr to 16.4%/yr without the winners: still ahead of SPY (14.1%/yr with dividends), but the
+  headline number is mostly hindsight. All of these numbers are in the tournament table.
 - After that, the champion is the best live paper performer whose worst drop isn't much worse than SPY's.
 - The champion is reviewed at most weekly. A report card is written to `data/reports/` every Friday after the close.
+- The Bot screen has a **crash test**: every strategy replayed through the dot-com bust, 2008, the Covid crash and 2022.
+  The momentum strategies lost 3-13% in 2000-02 and 2008 while SPY lost 45-52%, but all of them fell about 19% in the
+  five-week Covid crash, because a 200-day trend filter is too slow for a crash that fast.
 
 Risk limits on your account: max % per stock, cash reserve, a daily loss halt, and a kill switch. Automatic trailing stops are off by default: in 10-year backtests they sold winners on normal dips and lowered every strategy's return (Momentum Weekly 22% → 17%/yr). Set "Trailing stop" above 0 in Settings to turn them back on.
 
-Research notes (Nov 2026), so they aren't repeated: a bigger 100-stock list, momentum across ~50 ETFs, gold or bonds
-instead of T-bills when risk-off, faster market filters, and mixing in the 2x Nasdaq strategy all did worse once hindsight
-was accounted for.
+Research notes (Nov 2026), so they aren't repeated. All tested on 11 years and on 30 years of dividend-adjusted prices,
+without the biggest winners and on 40 random halves of the stock list:
+- Did worse or no better once hindsight was accounted for: a bigger 100-stock list, momentum across ~50 ETFs, gold or bonds
+  instead of T-bills when risk-off, faster market filters, and mixing in the 2x Nasdaq strategy.
+- Volatility targeting (Barroso & Santa-Clara 2015; Moreira & Muir 2017): cut returns by 2-6 points a year with no gain in
+  Sharpe, matching the out-of-sample critique by Cederburg et al. (2020).
+- Residual momentum (Blitz, Huij & Martens 2011): lower return and deeper drops than plain momentum on this stock list.
+- Breadth-based crash protection (Keller & Keuning): too much time in cash, 8-10%/yr without the winners.
+- Momentum plus a low-volatility screen: steady (Sharpe about 1.1) but only matches SPY's return.
+- "Frog in the pan" smooth momentum (Da, Gurun & Warachka 2014) and a graded 7-signal trend filter: no better than the simple versions.
+- Concentration and timing: 3 to 8 stocks all beat SPY on random halves; weekly checks beat every-2-weeks and monthly.
+- Held up and were added: 52-Week High, and the three-signal Core Blend.
+- Nasdaq 2x Trend made 22%/yr over the last decade but only 12%/yr since 2006 with a 47% drop: its recent record is mostly the era.
 
 No strategy is guaranteed to make money. Backtests overstate results (they test today's winners), so
 let the paper tournament run for a few months before trusting any of it with real money.

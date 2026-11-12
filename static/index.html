@@ -234,6 +234,13 @@
     <div id="t-legend" class="legend"></div>
     <p class="muted small">Every strategy trades its own fake $100,000 on live prices. Under 60 trading days, results are mostly luck.</p>
   </div>
+  <div class="card hidden" id="crash-card">
+    <h3>Crash test: how each strategy did in past bear markets</h3>
+    <div class="table-wrap"><table id="crash-table"></table></div>
+    <p class="muted small">The same rules replayed through every bear market since the 1990s, with dividends included. Stocks join as they came to market,
+      and the list is still today's winners, so the good years are flattered. Read the bad periods: that is what the strategy does when the market falls.
+      Hover a number for the worst drop inside that period.</p>
+  </div>
   <div class="grid2">
     <div class="card">
       <div class="card-head"><h3>10-year backtest (growth of $10k)</h3><button id="bt-run" class="ghost small">Re-run</button></div>
@@ -342,7 +349,7 @@
   </form>
 </dialog>
 <div id="toasts"></div>
-<script src="static/app.js?v=15"></script>
+<script src="static/app.js?v=16"></script>
 <script src="static/learn.js?v=1"></script>
 </body>
 </html>

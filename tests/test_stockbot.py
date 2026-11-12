@@ -164,10 +164,46 @@ class StrategyTests(unittest.TestCase):
         series["SPY"] = self.trend(100, 0.0005)
         full = make_ctx(series)
         cut = make_ctx({s: v[:300] for s, v in series.items()})
-        for key in ("momentum_max", "momentum_weekly", "trend_momentum", "concentrated"):
+        for key in ("momentum_max", "momentum_weekly", "trend_momentum", "concentrated", "high_52w", "core_blend"):
             a, _ = strategy.STRATEGIES[key]["fn"](full, 299, {})
             b, _ = strategy.STRATEGIES[key]["fn"](cut, 299, {})
             self.assertEqual(a, b, key)
+
+    def test_52_week_high_picks_stocks_at_their_highs_and_keeps_holdings(self):
+        series = {s: self.trend(100, 0.001, wiggle=0.0) for s in strategy.STOCKS}
+        fallen = strategy.STOCKS[:25]  # leaves 12 stocks at their highs
+        for s in fallen:  # still above the 200-day average, but 8% off the high
+            series[s] = series[s][:-10] + [series[s][-11] * 0.92] * 10
+        series["SPY"] = self.trend(100, 0.0005)
+        ctx = make_ctx(series)
+        w, notes = strategy.high_52w(ctx, ctx.last, {})
+        self.assertEqual(len(w), 6)
+        self.assertFalse(set(w) & set(fallen), w)
+        self.assertTrue(all("52-week high" in n for n in notes.values()))
+        held = [s for s in strategy.STOCKS if s not in fallen and s not in w][:6]
+        kept, _ = strategy.high_52w(ctx, ctx.last, held)
+        self.assertEqual(set(kept), set(held))  # all at their highs: no reason to swap
+
+    def test_core_blend_mixes_three_strategies_and_stays_fully_invested(self):
+        series = {s: self.trend(100, 0.0002 * (k + 1), seed=k) for k, s in enumerate(strategy.STOCKS)}
+        series["SPY"] = self.trend(100, 0.0005)
+        series["BIL"] = [100 + i * 0.01 for i in range(self.N)]
+        ctx = make_ctx(series)
+        w, notes = strategy.core_blend(ctx, ctx.last, {})
+        self.assertAlmostEqual(sum(w.values()), 1.0, places=6)
+        self.assertGreater(len(w), 4)  # more names than Momentum Max alone
+        final = strategy.finalize("core_blend", w)
+        self.assertTrue(all(v <= 0.25 for s, v in final.items() if s not in strategy.ETFS))
+        self.assertTrue(any("+" in n for n in notes.values()))  # some stocks are picked by more than one signal
+        series["SPY"] = self.trend(100, -0.001)
+        ctx = make_ctx(series)
+        w, _ = strategy.core_blend(ctx, ctx.last, {})
+        self.assertEqual(set(w), {strategy.SAFE})
+
+    def test_adjusted_prices_are_used_when_present(self):
+        candles = [{"time": 86400 * (20000 + i), "close": 100.0, "adj": 50.0 + i} for i in range(5)]
+        ctx = strategy.Context({"SPY": candles})
+        self.assertEqual(ctx.px("SPY", 4), 54.0)
 
     def test_finalize_respects_caps_and_reserve(self):
         w = strategy.finalize("momentum_max", {"AAPL": 0.5, "MSFT": 0.5}, reserve=0.02, max_stock_w=0.25)
