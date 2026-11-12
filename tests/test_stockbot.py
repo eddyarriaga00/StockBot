@@ -25,6 +25,10 @@ class FakeMarket:
     def __init__(self):
         self.prices = {"AAPL": 100.0, "MSFT": 200.0, "SPY": 500.0, "BIL": 91.0}
         self.open = True
+        self.actions = {}
+
+    def corporate_actions_for(self, symbols):
+        return {s: self.actions[s] for s in symbols if s in self.actions}
 
     def quote(self, symbol):
         if symbol not in self.prices:
@@ -40,7 +44,7 @@ class FakeMarket:
         return {s: self.quote(s) for s in symbols if s in self.prices}
 
     def install(self, test):
-        for name in ("quote", "quotes"):
+        for name in ("quote", "quotes", "corporate_actions_for"):
             orig = getattr(market, name)
             setattr(market, name, getattr(self, name))
             test.addCleanup(setattr, market, name, orig)

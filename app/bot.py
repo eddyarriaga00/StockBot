@@ -223,6 +223,12 @@ class Bot:
             return
         if self._halted():
             return
+        settle = getattr(self.get_broker(), "apply_corporate_actions", None)
+        if settle:  # a split that isn't applied yet would look like a half-sized position
+            try:
+                settle(force=True)
+            except market.MarketDataError:
+                pass
         orders, summary = self.plan_orders()
         with self.lock:
             self.state["last_rebalance"] = time.time()

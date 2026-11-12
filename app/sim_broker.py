@@ -9,6 +9,8 @@ Rules modeled after how US retail brokers behave:
 - Cash account: no margin, no short selling, buying power reserved by open buy orders.
 - Fractional shares and dollar-amount orders allowed for market orders only.
 - Bracket orders attach a take-profit and a stop-loss that cancel each other (OCO).
+- Dividends are paid in cash on the ex-dividend date (real brokers pay a few weeks later), and stock splits
+  change the share count and average cost and cancel that stock's open orders.
 """
 import sqlite3
 import threading
@@ -19,6 +21,7 @@ from . import market
 
 TYPES = ("market", "limit", "stop", "stop_limit", "trailing_stop")
 OPEN_STATUSES = ("new", "accepted", "held")
+ACTIONS_EVERY = 1800  # seconds between dividend / split checks
 
 
 class OrderError(Exception):
@@ -32,6 +35,7 @@ class SimBroker:
         self.db = sqlite3.connect(db_path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.lock = threading.RLock()
+        self._actions_checked = 0
         self._init(starting_cash)
 
     # ---------- storage ----------
@@ -49,6 +53,7 @@ class SimBroker:
                     parent_id TEXT, oco_group TEXT, take_profit REAL, stop_loss REAL,
                     source TEXT DEFAULT 'manual', reason TEXT, reject_reason TEXT);
                 CREATE TABLE IF NOT EXISTS equity (time REAL PRIMARY KEY, equity REAL);
+                CREATE TABLE IF NOT EXISTS activity (id TEXT PRIMARY KEY, time REAL, kind TEXT, symbol TEXT, amount REAL, qty REAL, note TEXT);
                 """
             )
             if not self.db.execute("SELECT 1 FROM account").fetchone():
@@ -57,7 +62,7 @@ class SimBroker:
 
     def reset(self, starting_cash: float = 100_000.0):
         with self.lock:
-            self.db.executescript("DELETE FROM positions; DELETE FROM orders; DELETE FROM equity; DELETE FROM account;")
+            self.db.executescript("DELETE FROM positions; DELETE FROM orders; DELETE FROM equity; DELETE FROM account; DELETE FROM activity;")
             self.db.execute("INSERT INTO account VALUES (1, ?, ?, ?)", (starting_cash, starting_cash, time.time()))
             self.db.commit()
 
@@ -123,6 +128,50 @@ class SimBroker:
             else:
                 rows = self.db.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT ?", (limit,))
             return [dict(r) for r in rows]
+
+    def activity(self, limit: int = 200) -> list:
+        """Dividends received and splits applied, newest first."""
+        with self.lock:
+            return [dict(r) for r in self.db.execute("SELECT * FROM activity ORDER BY time DESC LIMIT ?", (limit,))]
+
+    # ---------- dividends and splits ----------
+    def apply_corporate_actions(self, force: bool = False) -> list:
+        """Pay dividends and apply splits for stocks held since before the ex-date. Safe to call often."""
+        now = time.time()
+        if not force and now - self._actions_checked < ACTIONS_EVERY:
+            return []
+        self._actions_checked = now
+        with self.lock:
+            held = [dict(r) for r in self.db.execute("SELECT * FROM positions WHERE qty > 1e-9")]
+        if not held:
+            return []
+        actions = market.corporate_actions_for([p["symbol"] for p in held])
+        applied = []
+        with self.lock:
+            for p in held:
+                for a in actions.get(p["symbol"], []):
+                    aid = f"{a['kind']}:{p['symbol']}:{int(a['time'])}"
+                    if not p["opened_at"] < a["time"] <= now or self.db.execute("SELECT 1 FROM activity WHERE id=?", (aid,)).fetchone():
+                        continue
+                    row = self.db.execute("SELECT qty, avg_price FROM positions WHERE symbol=?", (p["symbol"],)).fetchone()
+                    if not row or row["qty"] <= 1e-9:
+                        continue
+                    qty = row["qty"]
+                    if a["kind"] == "dividend":
+                        amount = round(qty * a["amount"], 2)
+                        self.db.execute("UPDATE account SET cash=cash+?", (amount,))
+                        note = f"{p['symbol']} paid ${a['amount']:,.4g} a share on {qty:,.6g} shares"
+                    else:
+                        amount, ratio = 0.0, a["ratio"]
+                        self.db.execute("UPDATE positions SET qty=?, avg_price=? WHERE symbol=?", (qty * ratio, row["avg_price"] / ratio, p["symbol"]))
+                        self.db.execute(f"UPDATE orders SET status='canceled', updated_at=?, reject_reason='Canceled by a stock split.' "
+                                        f"WHERE symbol=? AND status IN {OPEN_STATUSES}", (now, p["symbol"]))
+                        note = f"{p['symbol']} split {ratio:g}-for-1: {qty:,.6g} shares became {qty * ratio:,.6g}"
+                    entry = {"id": aid, "time": a["time"], "kind": a["kind"], "symbol": p["symbol"], "amount": amount, "qty": qty, "note": note}
+                    self.db.execute("INSERT INTO activity VALUES (:id, :time, :kind, :symbol, :amount, :qty, :note)", entry)
+                    applied.append(entry)
+            self.db.commit()
+        return applied
 
     def _reserved_cash(self) -> float:
         total = 0.0
@@ -265,6 +314,11 @@ class SimBroker:
     # ---------- matching engine ----------
     def tick(self, only: str = None):
         """Check every open order against live prices and fill/expire as a real broker would."""
+        if not only:
+            try:
+                self.apply_corporate_actions()
+            except market.MarketDataError:
+                pass
         with self.lock:
             sql = f"SELECT * FROM orders WHERE status IN {OPEN_STATUSES}" + (" AND id=?" if only else "")
             open_orders = [dict(r) for r in self.db.execute(sql, (only,) if only else ())]

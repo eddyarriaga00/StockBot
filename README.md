@@ -42,9 +42,10 @@ One webhook is enough, but each kind of message can have its own channel (Settin
 Charts are drawn by `app/chart.py` in pure Python (no extra packages), and nothing is sent anywhere except Discord.
 
 ## Screens
-- **Trade**: search, watchlist, live charts (1D to MAX, line or candles), key stats, news, and an order ticket
+- **Trade**: search, watchlist, live charts (1D to MAX, line or candles), key stats, price alerts, news, and an order ticket
   (market / limit / stop / stop-limit / trailing stop, shares or dollars, day or GTC, take-profit / stop-loss) with a review step.
-- **Portfolio**: account value chart, positions, open orders (cancel), order history.
+- **Portfolio**: account value chart, performance (returns by period against SPY, worst drop, best and worst day,
+  profit on sold shares, win rate, dividends), positions, open orders (cancel), order history, dividends and splits.
 - **Bot**: on/off switch, full-auto or approve-each mode, kill switch, what the bot will do next and when, its target portfolio,
   a health line, the strategy tournament, backtest vs SPY, today's scan with reasons, risk limits, activity log.
 - **Settings**: choose Simulator, Alpaca Paper, or Alpaca Live; paste Alpaca keys.
@@ -74,9 +75,15 @@ let the paper tournament run for a few months before trusting any of it with rea
 
 ## Tests
 `.venv/bin/python -m unittest discover tests` runs offline tests of the simulator (fills, queuing, limits, brackets,
-trailing stops), the strategies (picks, risk-off, no look-ahead, caps) and the bot (rebalancing, approvals, leaving your
+trailing stops, dividends, splits), the strategies (picks, risk-off, no look-ahead, caps) and the bot (rebalancing, approvals, leaving your
 own trades alone) against a fake market.
 
 ## Simulator rules
 Buys fill at the ask and sells at the bid. Orders placed while the market is closed queue until the open. Day orders expire at the close.
 It's a cash account: no margin and no shorting. Prices come from Yahoo Finance; bid/ask are estimated.
+Dividends are added as cash on the ex-dividend date (a real broker pays a few weeks later). Stock splits change the share count
+and average cost and cancel that stock's open orders. Both are checked every 30 minutes and before every bot rebalance.
+
+## Price alerts
+On the Trade screen, enter a price and click Alert me. When the stock gets there you get a notice in the app, a line in the
+bot's activity log, and a Discord message in #alerts. An alert fires once and never places an order.

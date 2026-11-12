@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StockBot</title>
   <meta name="description" content="StockBot: a trading bot that runs a live tournament of strategies on fake money. Watch its trades, charts, and results.">
-  <link rel="stylesheet" href="static/style.css?v=9">
+  <link rel="stylesheet" href="static/style.css?v=11">
   <script src="static/vendor/lightweight-charts.js"></script>
 </head>
 <body>
@@ -84,6 +84,16 @@
       <div id="my-position" class="muted">You don't own this stock.</div>
     </div>
 
+    <div class="card live-only" id="alerts-card">
+      <h3>Price alerts</h3>
+      <form id="alert-form" class="row">
+        <input id="alert-price" type="number" step="0.01" min="0" placeholder="Price" aria-label="Alert price">
+        <button class="ghost" id="alert-add">Alert me</button>
+      </form>
+      <p class="muted small" id="alert-hint">Get a notice here (and in Discord, if connected) when the price gets there. Alerts never place orders.</p>
+      <div id="alerts-list"></div>
+    </div>
+
     <div class="card">
       <h3>News</h3>
       <div id="news" class="news muted">Loading…</div>
@@ -156,6 +166,11 @@
     <div id="equity-chart" class="chart short"></div>
   </div>
   <div class="card">
+    <div class="card-head"><h3>Performance</h3><span class="muted small" id="perf-since"></span></div>
+    <div class="table-wrap"><table id="perf-table"></table></div>
+    <div class="stats perf-stats" id="perf-stats"></div>
+  </div>
+  <div class="card">
     <div class="card-head"><h3>Positions</h3></div>
     <div class="table-wrap"><table id="positions-table"></table></div>
   </div>
@@ -166,6 +181,10 @@
   <div class="card">
     <h3>Order history</h3>
     <div class="table-wrap"><table id="order-history"></table></div>
+  </div>
+  <div class="card hidden" id="activity-card">
+    <h3>Dividends and splits</h3>
+    <div class="table-wrap"><table id="activity-table"></table></div>
   </div>
 </main>
 
@@ -298,7 +317,7 @@
 </main>
 
 <div id="toasts"></div>
-<script src="static/app.js?v=10"></script>
+<script src="static/app.js?v=11"></script>
 <script src="static/learn.js?v=1"></script>
 </body>
 </html>

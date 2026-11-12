@@ -56,7 +56,7 @@ class Discord:
         self.health = None  # set by main: used for the dashboard's status line
         self.lock = threading.RLock()
         self.state = {"seen_orders": [], "last_daily": None, "last_report": None, "champion_changes": 0, "primed": False,
-                      "messages": {}, "last_dashboard": 0, "last_brief": None, "movers": {}, "ath": None, "ath_day": None}
+                      "seen_activity": None, "messages": {}, "last_dashboard": 0, "last_brief": None, "movers": {}, "ath": None, "ath_day": None}
         if os.path.exists(self.path):
             with open(self.path) as f:
                 self.state.update(json.load(f))
@@ -210,7 +210,7 @@ class Discord:
         if not self.connected():
             return
         try:
-            for check in (self._check_fills, lambda: self._check_brief(clock), lambda: self._check_daily(clock),
+            for check in (self._check_fills, self._check_activity, lambda: self._check_brief(clock), lambda: self._check_daily(clock),
                           self._check_weekly, lambda: self._check_movers(clock), self._check_high,
                           lambda: self._check_dashboard(clock)):
                 try:
@@ -272,6 +272,32 @@ class Discord:
                       ("Now holding", f"{now_w:.1f}% of the account" if now_w > 0.05 else "None (sold out)", False)]
             self.send(f"{'🟢 BUY' if buy else '🔴 SELL'} {o['symbol']}", f"{who}: {o.get('reason') or o['type'] + ' order'}",
                       GREEN if buy else RED, fields, url=SITE, kind="trades")
+
+    def _check_activity(self):
+        """Dividends and splits (simulator only: Alpaca reports its own)."""
+        broker = self.get_broker()
+        if not hasattr(broker, "activity"):
+            return
+        items = broker.activity(50)
+        seen = self.state["seen_activity"]
+        self.state["seen_activity"] = [a["id"] for a in items]
+        if seen is None or not self.on("trades"):  # first run: don't replay old history
+            return
+        for a in reversed([a for a in items if a["id"] not in seen]):
+            if a["kind"] == "dividend":
+                self.send(f"💵 Dividend · {a['symbol']}", f"{a['note']}.", GREEN, [("Cash added", f"${a['amount']:,.2f}", True)],
+                          url=SITE, kind="trades")
+            else:
+                self.send(f"✂️ Stock split · {a['symbol']}", f"{a['note']}. The value of the position is unchanged.", BLUE,
+                          url=SITE, kind="trades")
+
+    def price_alert(self, a):
+        if not self.connected() or not self.on("alerts"):
+            return
+        up = a["direction"] == "above"
+        self.send(f"🔔 {a['symbol']} is {'above' if up else 'below'} ${a['price']:,.2f}",
+                  f"Your price alert was reached. {a['symbol']} is now **${a['fired_price']:,.2f}**. No order was placed.",
+                  GREEN if up else RED, url=SITE, kind="alerts")
 
     # ---------- daily ----------
     def _check_brief(self, clock):

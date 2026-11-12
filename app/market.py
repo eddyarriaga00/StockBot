@@ -148,6 +148,38 @@ def daily_closes(symbol: str, rng: str = "2y") -> list:
     return _cached(f"d:{symbol}:{rng}", 3600, lambda: _candles(_chart(symbol, rng, "1d")))
 
 
+def corporate_actions(symbol: str) -> list:
+    """Recent dividends and splits, oldest first: {"kind": "dividend", "time", "amount"} (dollars per share)
+    or {"kind": "split", "time", "ratio"} (new shares per old share). Times are the ex-date's market open."""
+    symbol = symbol.upper()
+
+    def load():
+        q = urllib.parse.urlencode({"range": "6mo", "interval": "1d", "events": "div,splits"})
+        data = _get_json(f"{BASE}/v8/finance/chart/{urllib.parse.quote(symbol)}?{q}")
+        result = (data.get("chart") or {}).get("result")
+        if not result:
+            raise MarketDataError(f"No data for {symbol}")
+        ev = result[0].get("events") or {}
+        out = [{"kind": "dividend", "time": d["date"], "amount": float(d["amount"])}
+               for d in (ev.get("dividends") or {}).values() if d.get("amount")]
+        out += [{"kind": "split", "time": x["date"], "ratio": float(x["numerator"]) / float(x["denominator"])}
+                for x in (ev.get("splits") or {}).values() if x.get("numerator") and x.get("denominator")]
+        return sorted(out, key=lambda a: a["time"])
+
+    return _cached(f"ca:{symbol}", 900, load)
+
+
+def corporate_actions_for(symbols: list) -> dict:
+    out = {}
+    futures = {s: _pool.submit(corporate_actions, s) for s in symbols}
+    for s, f in futures.items():
+        try:
+            out[s.upper()] = f.result()
+        except MarketDataError:
+            pass
+    return out
+
+
 def search(q: str) -> list:
     if not q.strip():
         return []

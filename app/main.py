@@ -12,7 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import market, strategy
+from . import market, performance, strategy
+from .alerts import AlertError, Alerts
 from .alpaca_broker import AlpacaBroker
 from .bot import DEFAULT_BOT, Bot
 from .health import Health
@@ -93,6 +94,15 @@ remote = Remote(DATA, PORT, on_url_change=lambda: publisher.publish())
 discord = Discord(DATA, load_settings, get_broker, tournament)
 health = Health(DATA)
 bot.on_log = discord.on_log
+
+
+def _alert_fired(a):
+    msg = f"{a['symbol']} went {a['direction']} ${a['price']:,.2f} (now ${a['fired_price']:,.2f})."
+    bot.log(f"Price alert: {msg}", "alert")
+    discord.price_alert(a)
+
+
+alerts = Alerts(DATA, notify=_alert_fired)
 discord.bot, discord.health = bot, health
 app = FastAPI(title="StockBot")
 
@@ -130,6 +140,7 @@ def _loop():
             tournament.step(clock)
             publisher.step(clock)
             discord.step(clock)
+            alerts.step()
             health.beat()
         except Exception as e:  # keep running no matter what
             health.loop_errors += 1
@@ -263,6 +274,42 @@ def api_equity():
         return get_broker().equity_history()
     except OrderError as e:
         _err(e)
+
+
+@app.get("/api/performance")
+def api_performance():
+    try:
+        return performance.for_broker(get_broker())
+    except (OrderError, market.MarketDataError) as e:
+        _err(e)
+
+
+@app.get("/api/activity")
+def api_activity():
+    b = get_broker()
+    return b.activity() if hasattr(b, "activity") else []
+
+
+@app.get("/api/alerts")
+def api_alerts():
+    return alerts.list()
+
+
+@app.post("/api/alerts")
+def api_alert_add(body: dict = Body(...)):
+    try:
+        return alerts.add(body.get("symbol"), body.get("price"), body.get("direction"))
+    except AlertError as e:
+        _err(e)
+
+
+@app.delete("/api/alerts/{aid}")
+def api_alert_remove(aid: str):
+    try:
+        alerts.remove(aid)
+    except AlertError as e:
+        _err(e)
+    return {"ok": True}
 
 
 @app.get("/api/orders")

@@ -39,7 +39,7 @@ async function snapshotApi(path, opts) {
   const sym = (s) => (symFiles[s] ??= fetch(`data/sym/${encodeURIComponent(s)}.json`, { cache: "no-store" })
     .then((r) => { if (!r.ok) throw new Error(`${s} isn't on the published watchlist.`); return r.json(); }));
   const fixed = { account: core.account, equity: core.equity, watchlist: core.watchlist, clock: core.clock, bot: core.bot,
-    tournament: core.tournament, settings: core.settings, strategies: core.strategies, "bot/backtest": core.backtest };
+    tournament: core.tournament, settings: core.settings, performance: core.performance || null, activity: core.activity || [], strategies: core.strategies, "bot/backtest": core.backtest };
   const full = arg ? `${route}/${arg}` : route;
   if (full in fixed) return fixed[full];
   if (full === "tournament/curves") return core.tournament_curves;
@@ -211,6 +211,7 @@ async function selectSymbol(sym) {
   localSet("symbol", state.symbol);
   showView("trade");
   $("#q-symbol").textContent = state.symbol;
+  renderAlerts();
   $("#news").textContent = "Loading…";
   renderWatchlist();
   await refreshQuote();
@@ -267,6 +268,47 @@ function renderMyPosition() {
     <div><span>Total return</span><b class="${cls(p.unrealized_pl)}">${signed(p.unrealized_pl)} (${pct(p.unrealized_pl_pct)})</b></div>
   </div>`;
 }
+
+// ---------- price alerts ----------
+async function refreshAlerts() {
+  if (SNAPSHOT) return;
+  const list = await api("/api/alerts").catch(() => null);
+  if (!list) return;
+  const seen = new Set(JSON.parse(localGet("alerts-seen") || "[]"));
+  const fresh = list.filter((a) => a.fired && !seen.has(a.id));
+  if (state.alerts) fresh.forEach((a) => toast(`🔔 ${a.symbol} is ${a.direction} ${money(a.price)} (now ${money(a.fired_price)})`, "ok"));
+  localSet("alerts-seen", JSON.stringify(list.filter((a) => a.fired).map((a) => a.id)));
+  state.alerts = list;
+  renderAlerts();
+}
+
+function renderAlerts() {
+  const list = state.alerts || [];
+  $("#alert-add").textContent = `Alert me on ${state.symbol}`;
+  $("#alerts-list").innerHTML = list.map((a) => `<div class="alert-row ${a.fired ? "fired" : ""}">
+    <button class="link" data-alert-sym="${esc(a.symbol)}"><b>${esc(a.symbol)}</b></button>
+    <span>${a.direction === "above" ? "rises to" : "falls to"} <b>${money(a.price)}</b></span>
+    <span class="muted small">${a.fired ? `Reached ${when(a.fired)} at ${money(a.fired_price)}` : `Waiting · set at ${money(a.price_then)}`}</span>
+    <button class="ghost small" data-alert-del="${a.id}" title="Remove this alert">Remove</button></div>`).join("");
+}
+
+$("#alert-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const price = parseFloat($("#alert-price").value);
+  if (!(price > 0)) return toast("Enter the price to be alerted at.", "bad");
+  try {
+    const a = await api("/api/alerts", { method: "POST", body: { symbol: state.symbol, price } });
+    $("#alert-price").value = "";
+    toast(`Alert set: ${a.symbol} ${a.direction === "above" ? "rises to" : "falls to"} ${money(a.price)}`, "ok");
+    refreshAlerts();
+  } catch (err) { toast(err.message, "bad"); }
+});
+$("#alerts-list").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-alert-del]"), sym = e.target.closest("[data-alert-sym]");
+  if (sym) return selectSymbol(sym.dataset.alertSym);
+  if (!del) return;
+  try { await api(`/api/alerts/${del.dataset.alertDel}`, { method: "DELETE" }); refreshAlerts(); } catch (err) { toast(err.message, "bad"); }
+});
 
 // ---------- watchlist ----------
 async function refreshWatchlist() {
@@ -520,9 +562,15 @@ async function renderPortfolio() {
       <td class="r"><button class="ghost small" data-close="${p.symbol}">Sell all</button></td></tr>`).join("")
     : `<tr><td class="empty">No positions yet. Search for a stock and buy it, or turn on the bot.</td></tr>`;
 
-  const [open, hist, eq] = await Promise.all([
+  const [open, hist, eq, perf, acts] = await Promise.all([
     api("/api/orders?status=open").catch(() => []), api("/api/orders?status=closed").catch(() => []), api("/api/equity").catch(() => []),
+    api("/api/performance").catch(() => null), api("/api/activity").catch(() => []),
   ]);
+  renderPerformance(perf);
+  $("#activity-card").classList.toggle("hidden", !acts.length);
+  $("#activity-table").innerHTML = `<tr><th>Date</th><th>Symbol</th><th>What happened</th><th class="r">Cash</th></tr>` +
+    acts.map((x) => `<tr><td>${new Date(x.time * 1000).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</td>
+      <td><b>${esc(x.symbol)}</b></td><td>${esc(x.note)}</td><td class="r ${x.amount ? "up" : ""}">${x.amount ? "+" + money(x.amount) : "—"}</td></tr>`).join("");
   const orderRow = (o, canCancel) => `<tr><td>${when(o.created_at)}</td><td><b>${o.symbol}</b></td>
     <td>${o.side === "buy" ? "Buy" : "Sell"} · ${TYPE_NAMES[o.type] || o.type}${o.source === "bot" ? ' <span class="tag bot">bot</span>' : ""}</td>
     <td class="r">${o.notional ? money(o.notional) : shares(o.qty)}</td>
@@ -536,6 +584,28 @@ async function renderPortfolio() {
   const pts = eq.map((x) => ({ time: Math.floor(x.time), value: x.equity }));
   equitySeries.setData(pts.filter((p, i) => i === 0 || p.time > pts[i - 1].time));
   equityChart.timeScale().fitContent();
+}
+
+function renderPerformance(p) {
+  if (!p) { $("#perf-table").innerHTML = `<tr><td class="empty">Performance isn't available right now.</td></tr>`; $("#perf-stats").innerHTML = ""; return; }
+  const day = (t) => new Date(t * 1000).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  $("#perf-since").textContent = p.since ? `Since ${day(p.since)}` : "";
+  const cell = (v, pts) => v == null ? '<td class="r muted">—</td>' : `<td class="r ${cls(v)}">${pts ? (v >= 0 ? "+" : "") + v.toFixed(2) + " pts" : pct(v)}</td>`;
+  $("#perf-table").innerHTML = `<tr><th>Period</th><th class="r">This account</th><th class="r">S&amp;P 500 (SPY)</th><th class="r">Difference</th></tr>` +
+    p.periods.map((r) => `<tr><td>${esc(r.label)}</td>${cell(r.you)}${cell(r.spy)}${cell(r.diff, true)}</tr>`).join("");
+  const t = p.trades, d = (x) => x ? `<span class="${cls(x[1])}">${pct(x[1])}</span> <span class="muted small">${esc(x[0].slice(5))}</span>` : "—";
+  const tr = (x) => x ? `<span class="${cls(x.pl)}">${signed(x.pl)}</span> <span class="muted small">${esc(x.symbol)}</span>` : "—";
+  $("#perf-stats").innerHTML = [
+    ["Worst drop from a high", pct(p.max_drawdown)],
+    ["Now vs. highest value", p.from_high > -0.005 ? "At the high" : pct(p.from_high)],
+    ["Up days", p.days ? `${p.up_days} of ${p.days}` : "—"],
+    ["Best day", d(p.best_day)], ["Worst day", d(p.worst_day)],
+    ["Sharpe ratio", p.sharpe == null ? `<span class="muted" title="Needs 20 days of history">Needs 20 days</span>` : p.sharpe.toFixed(2)],
+    ["Profit on sold shares", t.count ? `<span class="${cls(t.realized)}">${signed(t.realized)}</span>` : "—"],
+    ["Winning sales", t.count ? `${t.wins} of ${t.count} (${t.win_rate.toFixed(0)}%)` : "—"],
+    ["Best sale", tr(t.best)], ["Worst sale", tr(t.worst)],
+    ["Dividends received", money(p.dividends)], ["Orders filled", String(t.fills)],
+  ].map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
 }
 
 $("#view-portfolio").addEventListener("click", async (e) => {
@@ -910,6 +980,7 @@ async function refreshClock() {
   setInterval(refreshQuote, 5000);
   setInterval(refreshWatchlist, 10000);
   setInterval(refreshAccount, 10000);
+  refreshAlerts(); setInterval(refreshAlerts, 15000);
   setInterval(refreshBot, 15000);
   setInterval(() => { if (state.view === "bot") refreshTournament(); }, 60000);
   setInterval(refreshClock, 60000);
