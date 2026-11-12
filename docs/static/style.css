@@ -286,3 +286,12 @@ body.remote .local-only { display: none !important; }
 .dc-ch small { font-size: 12px; }
 .dc-ch input { min-width: 0; width: 100%; }
 @media (max-width: 640px) { .dc-ch { grid-template-columns: 1fr; gap: 4px; } }
+
+/* performance + price alerts */
+.perf-stats { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.alert-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.alert-row .muted { flex: 1; min-width: 140px; }
+.alert-row.fired { opacity: .7; }
+#alert-form input { flex: 1; min-width: 0; }
+button.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.log .alert { color: var(--accent); }
