@@ -512,7 +512,7 @@ $("#review").addEventListener("click", () => {
   if (o.take_profit) lines.push(["Take profit", money(o.take_profit)]);
   if (o.stop_loss) lines.push(["Stop loss", money(o.stop_loss)]);
   lines.push(["Time in force", o.time_in_force === "gtc" ? "Good till canceled" : "Good for day"]);
-  if (o.extended_hours) lines.push(["Hours", "Pre-market, regular and after hours"]);
+  if (o.extended_hours) lines.push(["Hours", "4 AM to 8 PM ET"]);
   lines.push([o.side === "buy" ? "Est. cost" : "Est. credit", o.notional ? money(o.notional) : money(px * o.qty)]);
   $("#rv-title").textContent = `${o.side === "buy" ? "Buy" : "Sell"} ${o.symbol}`;
   $("#rv-lines").innerHTML = lines.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
