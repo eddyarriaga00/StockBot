@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import market, performance, strategy
+from . import market, performance, strategy, track
 from .alerts import AlertError, Alerts
 from .alpaca_broker import AlpacaBroker
 from .bot import DEFAULT_BOT, Bot
@@ -255,7 +255,10 @@ def api_news(symbol: str):
 
 @app.get("/api/clock")
 def api_clock():
-    return market.market_clock()
+    try:
+        return market.market_clock()
+    except market.MarketDataError as e:
+        raise HTTPException(503, f"Market data isn't reachable right now: {e}")
 
 
 # ---------- account / trading ----------
@@ -280,6 +283,14 @@ def api_equity():
 def api_performance():
     try:
         return performance.for_broker(get_broker())
+    except (OrderError, market.MarketDataError) as e:
+        _err(e)
+
+
+@app.get("/api/track")
+def api_track():
+    try:
+        return track.record(get_broker(), tournament)
     except (OrderError, market.MarketDataError) as e:
         _err(e)
 

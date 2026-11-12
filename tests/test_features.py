@@ -210,5 +210,54 @@ class RealisticTradingTests(unittest.TestCase):
             self.b.replace_order(buy["id"], {"qty": 100_000})  # can't afford it
 
 
+class TrackRecordTests(unittest.TestCase):
+    def test_market_calendar_knows_weekends_and_holidays(self):
+        import datetime as dt
+        from app import calendar_us as cal
+        self.assertFalse(cal.is_trading_day(dt.date(2026, 11, 26)))  # Thanksgiving
+        self.assertFalse(cal.is_trading_day(dt.date(2027, 3, 26)))   # Good Friday
+        self.assertFalse(cal.is_trading_day(dt.date(2026, 7, 3)))    # July 4 falls on a Saturday
+        self.assertFalse(cal.is_trading_day(dt.date(2026, 11, 7)))   # Saturday
+        self.assertTrue(cal.is_trading_day(dt.date(2026, 11, 11)))   # Veterans Day: the market is open
+        self.assertEqual(cal.add_trading_days(dt.date(2026, 11, 25), 1), dt.date(2026, 11, 27))
+
+    def test_record_counts_days_missed_sessions_and_milestones(self):
+        import datetime as dt
+        from app import calendar_us as cal, market, track
+        m = FakeMarket()
+        m.install(self)
+        orig = market.daily_closes
+        market.daily_closes = lambda s, rng="2y": []
+        self.addCleanup(setattr, market, "daily_closes", orig)
+        # Started Mon Nov 2 2026 at 9:00 AM ET; now is Fri Nov 6 at 5:00 PM ET. StockBot was off all day Wednesday.
+        at = lambda d, h, mi=0: dt.datetime(2026, 11, d, h, mi, tzinfo=cal.ET).timestamp()  # noqa: E731
+        hist = [{"time": at(2, 9), "equity": 100_000.0}]
+        for d in (2, 3, 5, 6):
+            hist += [{"time": at(d, 10) + i * 300, "equity": 100_000.0 + d * 100 + i} for i in range(70)]
+
+        class Broker:
+            def equity_history(self):
+                return hist
+
+            def orders(self, status, limit=500):
+                return [{"status": "filled", "source": "bot", "symbol": "AAPL", "side": "buy", "filled_qty": 1, "filled_avg_price": 100,
+                         "filled_at": at(2, 10)}]
+
+            def account(self):
+                return {"equity": 100_700.0, "starting_cash": 100_000.0, "day_pl_pct": 0.1}
+
+        t = track.record(Broker(), now=at(6, 17))
+        self.assertEqual((t["days"], t["trading_days"], t["covered_days"]), (5, 5, 4))
+        self.assertEqual(t["missed_days"], ["2026-11-04"])
+        self.assertEqual(t["rebalances"], 1)
+        ms = {x["key"]: x for x in t["milestones"]}
+        self.assertFalse(ms["live_days"]["done"])
+        self.assertAlmostEqual(ms["live_days"]["progress"], 5 / 60)
+        self.assertFalse(ms["uptime"]["done"])
+        self.assertIn("Nov 04", ms["uptime"]["detail"])
+        self.assertTrue(ms["drawdown"]["done"])
+        self.assertIn("Day 5 · 5 of 60 trading days", t["headline"])
+
+
 if __name__ == "__main__":
     unittest.main()

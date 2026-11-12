@@ -11,7 +11,7 @@ import os
 import threading
 import time
 
-from . import market, strategy
+from . import calendar_us, market, strategy
 from .bot import Bot
 from .sim_broker import SimBroker
 
@@ -172,7 +172,7 @@ def _trading_days(since):
     d, end, n = dt.date.fromtimestamp(since), dt.date.today(), 0
     while d < end:
         d += dt.timedelta(days=1)
-        if d.weekday() < 5:
+        if calendar_us.is_trading_day(d):
             n += 1
     return n
 

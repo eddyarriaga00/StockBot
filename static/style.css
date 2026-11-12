@@ -313,3 +313,17 @@ dialog#edit-order label { display: block; margin: 12px 0; color: var(--muted); f
 dialog#edit-order label.hidden { display: none; }
 dialog#edit-order input { display: block; width: 100%; margin-top: 6px; }
 dialog#edit-order .row { margin-top: 18px; }
+
+/* track record */
+.day-badge { cursor: pointer; border: 1px solid var(--line); font: inherit; font-size: 12px; font-weight: 700; color: var(--accent); }
+.track-progress { margin: 18px 0 6px; }
+.track-progress .bar { height: 8px; background: var(--panel-2); border-radius: 99px; overflow: hidden; margin-bottom: 6px; }
+.track-progress .bar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; min-width: 4px; }
+.milestones { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 24px; margin-bottom: 12px; }
+.milestones > div { display: flex; gap: 10px; align-items: flex-start; }
+.milestones i { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--line); font-style: normal; font-size: 12px; font-weight: 800;
+  display: grid; place-items: center; color: #04150e; margin-top: 1px; }
+.milestones .done i { background: var(--up); border-color: var(--up); }
+.milestones b { display: block; font-size: 14px; }
+.milestones span { display: block; }
+@media (max-width: 760px) { .milestones { grid-template-columns: 1fr; } }

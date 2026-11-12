@@ -10,6 +10,8 @@ import subprocess
 import time
 from zoneinfo import ZoneInfo
 
+from . import calendar_us
+
 ET = ZoneInfo("America/New_York")
 
 
@@ -53,11 +55,11 @@ class Health:
 
 
 def missed_sessions(t0, t1):
-    """Weekdays whose whole 9:30-16:00 ET session passed while StockBot was off (market holidays not excluded)."""
+    """Weekdays whose whole 9:30-16:00 ET session passed while StockBot was off (market holidays excluded)."""
     a, b = dt.datetime.fromtimestamp(t0, ET), dt.datetime.fromtimestamp(t1, ET)
     out, d = [], a.date()
     while d <= b.date():
-        if d.weekday() < 5:
+        if calendar_us.is_trading_day(d):
             open_ = dt.datetime.combine(d, dt.time(9, 30), ET)
             close = dt.datetime.combine(d, dt.time(16, 0), ET)
             if a <= open_ + dt.timedelta(minutes=30) and b >= close:  # off for the whole session: no chance to trade

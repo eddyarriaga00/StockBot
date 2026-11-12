@@ -45,7 +45,12 @@ def _cached(key: str, ttl: float, fn):
         hit = _cache.get(key)
         if hit and now - hit[0] < ttl:
             return hit[1]
-    value = fn()
+    try:
+        value = fn()
+    except MarketDataError:
+        if hit and now - hit[0] < max(60, ttl * 3):  # a brief network blip: keep using the last good answer
+            return hit[1]
+        raise
     with _lock:
         _cache[key] = (now, value)
     return value

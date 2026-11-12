@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StockBot</title>
   <meta name="description" content="StockBot: a trading bot that runs a live tournament of strategies on fake money. Watch its trades, charts, and results.">
-  <link rel="stylesheet" href="static/style.css?v=12">
+  <link rel="stylesheet" href="static/style.css?v=13">
   <script src="static/vendor/lightweight-charts.js"></script>
 </head>
 <body>
@@ -23,6 +23,7 @@
     <button data-view="settings" class="live-only">Settings</button>
   </nav>
   <div class="status">
+    <button id="day-badge" class="pill day-badge hidden" title="How long the account has been running. Click for the track record."></button>
     <span id="broker-badge" class="badge">SIMULATOR</span>
     <span id="market-pill" class="pill">—</span>
   </div>
@@ -212,6 +213,14 @@
       <button id="bot-kill" class="danger">KILL SWITCH</button>
     </div>
   </div>
+  <div class="card" id="track-card">
+    <div class="card-head"><h3>Track record</h3><span class="muted small" id="track-since"></span></div>
+    <div class="kpis" id="track-kpis"></div>
+    <div class="track-progress"><div class="bar"><i id="track-bar"></i></div><span class="muted small" id="track-bar-label"></span></div>
+    <h3 class="sub">Milestones before trusting it with real money</h3>
+    <div id="track-milestones" class="milestones"></div>
+    <p class="muted small" id="track-note"></p>
+  </div>
   <div class="card hidden" id="pending-card">
     <h3>Waiting for your approval</h3>
     <div id="pending"></div>
@@ -333,7 +342,7 @@
   </form>
 </dialog>
 <div id="toasts"></div>
-<script src="static/app.js?v=13"></script>
+<script src="static/app.js?v=15"></script>
 <script src="static/learn.js?v=1"></script>
 </body>
 </html>

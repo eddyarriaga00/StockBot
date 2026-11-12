@@ -39,7 +39,7 @@ async function snapshotApi(path, opts) {
   const sym = (s) => (symFiles[s] ??= fetch(`data/sym/${encodeURIComponent(s)}.json`, { cache: "no-store" })
     .then((r) => { if (!r.ok) throw new Error(`${s} isn't on the published watchlist.`); return r.json(); }));
   const fixed = { account: core.account, equity: core.equity, watchlist: core.watchlist, clock: core.clock, bot: core.bot,
-    tournament: core.tournament, settings: core.settings, performance: core.performance || null, activity: core.activity || [], strategies: core.strategies, "bot/backtest": core.backtest };
+    tournament: core.tournament, settings: core.settings, performance: core.performance || null, track: core.track || null, activity: core.activity || [], strategies: core.strategies, "bot/backtest": core.backtest };
   const full = arg ? `${route}/${arg}` : route;
   if (full in fixed) return fixed[full];
   if (full === "tournament/curves") return core.tournament_curves;
@@ -815,6 +815,36 @@ function renderBot() {
   $("#bot-log").innerHTML = b.log.length ? b.log.map((l) => `<div class="${l.kind}"><span class="muted">${when(l.time)}</span><span>${esc(l.msg)}</span></div>`).join("") : '<div class="muted">Nothing yet.</div>';
 }
 
+// ---------- track record ----------
+async function refreshTrack() {
+  const t = await api("/api/track").catch(() => null);
+  if (!t) return;
+  state.track = t;
+  const day = (x) => new Date(x * 1000).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+  const badge = $("#day-badge");
+  badge.textContent = `Day ${t.days}`;
+  badge.classList.remove("hidden");
+  $("#track-since").textContent = `Running since ${day(t.started)}`;
+  const span = t.days < 14 ? `${t.days} day${t.days === 1 ? "" : "s"}` : t.days < 70 ? `${Math.floor(t.days / 7)} weeks` : `${(t.days / 30.4).toFixed(1)} months`;
+  const num = (v) => v == null ? "—" : `<span class="${cls(v)}">${pct(v)}</span>`;
+  $("#track-kpis").innerHTML = [
+    ["Running for", t.days < 14 ? span : `${span} <span class="muted small">day ${t.days}</span>`],
+    ["Trading days", `${t.trading_days}`],
+    ["StockBot was running", `${t.covered_days} of ${t.trading_days} days${t.missed_days.length ? ` <span class="down small">${t.missed_days.length} missed</span>` : ""}`],
+    ["Since the start", num(t.ret)], ["S&P 500, same time", num(t.spy_ret)],
+    ["Worst drop", pct(t.max_drawdown)],
+    ["Up weeks", t.weeks_done ? `${t.weeks_up} of ${t.weeks_done}` : "First week"],
+    ["Rebalances", String(t.rebalances)], ["Trades", String(t.trades)],
+  ].map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
+  const frac = Math.min(1, t.trading_days / t.live_days_needed);
+  $("#track-bar").style.width = (frac * 100).toFixed(1) + "%";
+  $("#track-bar-label").textContent = `${t.trading_days} of ${t.live_days_needed} trading days. Before that, results are mostly luck.`;
+  $("#track-milestones").innerHTML = t.milestones.map((m) => `<div class="${m.done ? "done" : ""}">
+    <i>${m.done ? "✓" : ""}</i><div><b>${esc(m.name)}</b><span class="muted small">${esc(m.detail)}</span></div></div>`).join("");
+  $("#track-note").textContent = `${t.milestones_done} of ${t.milestones.length} met. ${t.note}`;
+}
+$("#day-badge").addEventListener("click", () => { showView("bot"); $("#track-card").scrollIntoView({ behavior: "smooth", block: "start" }); });
+
 async function refreshTournament() {
   let t;
   try { t = await api("/api/tournament"); } catch (e) { $("#t-champion").textContent = "Tournament data not ready yet: " + e.message; return; }
@@ -1045,7 +1075,7 @@ function showView(v) {
   $$(".view").forEach((el) => el.classList.toggle("hidden", el.id !== "view-" + v));
   if (v === "portfolio") renderPortfolio();
   if (v === "bot") {
-    renderBot(); refreshTournament();
+    renderBot(); refreshTournament(); refreshTrack();
     if (!Object.keys(btLines).length) loadBacktest(false);
     if (!state.bot?.last_scan) api("/api/bot/scan", { method: "POST" }).then(refreshBot).catch(() => {});
   }
@@ -1088,6 +1118,7 @@ async function refreshClock() {
   setInterval(refreshAccount, 10000);
   refreshAlerts(); setInterval(refreshAlerts, 15000);
   watchFills(); setInterval(watchFills, 8000);
+  refreshTrack(); setInterval(refreshTrack, 5 * 60000);
   setInterval(refreshBot, 15000);
   setInterval(() => { if (state.view === "bot") refreshTournament(); }, 60000);
   setInterval(refreshClock, 60000);

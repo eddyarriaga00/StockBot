@@ -13,7 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import market, performance, strategy
+from . import market, performance, strategy, track
 
 PUBLISH_EVERY_OPEN = 2 * 3600   # while the market is open
 RANGES = ["1d", "5d", "1mo", "1y", "5y"]
@@ -63,6 +63,7 @@ class Publisher:
             "equity": broker.equity_history()[-3000:],
             "orders": {"open": open_, "closed": closed, "all": open_ + closed},
             "performance": performance.for_broker(broker),
+            "track": track.record(broker, self.tournament),
             "activity": broker.activity() if hasattr(broker, "activity") else [],
             "watchlist": watchlist,
             "quotes": quotes,

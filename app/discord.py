@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from . import chart, market, strategy
+from . import chart, market, strategy, track
 
 SITE = "https://eddyarriaga00.github.io/StockBot/"
 WEBHOOK_RE = re.compile(r"^https://(?:ptb\.|canary\.)?(?:discord|discordapp)\.com/api/webhooks/\d+/[\w-]+$")
@@ -56,11 +56,12 @@ class Discord:
         self.health = None  # set by main: used for the dashboard's status line
         self.lock = threading.RLock()
         self.state = {"seen_orders": [], "last_daily": None, "last_report": None, "champion_changes": 0, "primed": False,
-                      "seen_activity": None, "messages": {}, "last_dashboard": 0, "last_brief": None, "movers": {}, "ath": None, "ath_day": None}
+                      "seen_activity": None, "milestones": None, "messages": {}, "last_dashboard": 0, "last_brief": None, "movers": {}, "ath": None, "ath_day": None}
         if os.path.exists(self.path):
             with open(self.path) as f:
                 self.state.update(json.load(f))
         self.q = queue.Queue(maxsize=200)
+        self._track_cache = (0, None)
         self.recent = {}  # alert text -> last sent, to avoid repeating the same error every 20 seconds
         self.last_error = None
         if start_worker:
@@ -211,7 +212,7 @@ class Discord:
             return
         try:
             for check in (self._check_fills, self._check_activity, lambda: self._check_brief(clock), lambda: self._check_daily(clock),
-                          self._check_weekly, lambda: self._check_movers(clock), self._check_high,
+                          self._check_weekly, lambda: self._check_movers(clock), self._check_high, self._check_milestones,
                           lambda: self._check_dashboard(clock)):
                 try:
                     check()
@@ -361,6 +362,9 @@ class Discord:
         nxt = self._next_action()
         if nxt:
             fields.append(("Next", nxt, False))
+        tf = self._track_field()
+        if tf:
+            fields.append(tf)
         vals = self._equity_values(30)
         self.send(f"{'📈' if up else '📉'} Daily summary · {time.strftime('%a %b %d')}", "", GREEN if up else RED, fields, url=SITE,
                   kind="daily", image=chart.line_chart(vals, baseline=a.get("starting_cash")) if len(vals) > 1 else None)
@@ -379,6 +383,47 @@ class Discord:
                 self.state["ath_day"] = today
                 self.send("🚀 New all-time high", f"The account just reached **${equity:,.2f}**, its highest value yet.", GREEN,
                           url=SITE, kind="daily")
+
+    # ---------- track record ----------
+    def _track(self):
+        try:
+            if time.time() - self._track_cache[0] < 600:
+                return self._track_cache[1]
+            t = track.record(self.get_broker(), self.tournament)
+            self._track_cache = (time.time(), t)
+            return t
+        except Exception:
+            return None
+
+    def _track_field(self):
+        t = self._track()
+        if not t:
+            return None
+        lines = [f"**Day {t['days']}** of the simulation · started <t:{int(t['started'])}:D>",
+                 f"{_bar(t['trading_days'] / t['live_days_needed'])} {t['trading_days']} of {t['live_days_needed']} trading days",
+                 f"Ran on {t['covered_days']} of {t['trading_days']} trading days · {t['rebalances']} rebalances · {t['trades']} trades",
+                 f"{t['milestones_done']} of {len(t['milestones'])} milestones met"]
+        return ("Track record", "\n".join(lines), False)
+
+    def _milestones_text(self, t):
+        return "\n".join(f"{'✅' if m['done'] else '⬜'} **{m['name']}**\n\u2003{m['detail']}" for m in t["milestones"])
+
+    def _check_milestones(self):
+        if time.time() - self.state.get("last_milestones", 0) < 1800:
+            return
+        self.state["last_milestones"] = time.time()
+        t = self._track()
+        if not t:
+            return
+        done = [m["key"] for m in t["milestones"] if m["done"]]
+        before = self.state["milestones"]
+        self.state["milestones"] = sorted(set(done) | set(before or []))
+        if before is None or not self.on("daily"):  # first run: learn where things stand without announcing
+            return
+        for m in t["milestones"]:
+            if m["done"] and m["key"] in track.STICKY and m["key"] not in before:
+                self.send(f"🏁 Milestone reached: {m['name']}", f"{m['detail']}\n\n{t['milestones_done']} of {len(t['milestones'])} "
+                          f"milestones are met on day {t['days']}.\n{t['note']}", GREEN, url=SITE, kind="daily")
 
     # ---------- alerts ----------
     def _check_movers(self, clock):
@@ -426,6 +471,9 @@ class Discord:
             cfg = self.bot.cfg
             fields.append(("Strategy", strategy.STRATEGIES[self.bot.strategy_key]["name"], True))
             fields.append(("Bot", ("On · " + ("full auto" if cfg["mode"] == "auto" else "asks before trading")) if cfg["enabled"] else "Off", True))
+        tf = self._track_field()
+        if tf:
+            fields.append(tf)
         fields.append(("Holdings", _holdings(pos, a["equity"]), False))
         nxt = self._next_action()
         if nxt:
@@ -453,7 +501,7 @@ class Discord:
         desc = ("StockBot is an auto-trader practicing with **fake money on real prices**. Nine strategies each trade their own "
                 "fake $100,000, and the main account follows the champion.\n\n" + "\n".join(lines) +
                 f"\n\n**Control it:** [open StockBot]({SITE}) from any device and enter your passcode to trade, change settings, "
-                "or stop the bot.\n**Reading the numbers:** results under about 60 trading days are mostly noise. "
+                "or stop the bot.\n**The goal:** build a paper track record good enough to trust before any real money is involved. The dashboard shows how many days it has run and which milestones are met.\n**Reading the numbers:** results under about 60 trading days are mostly noise. "
                 "One good or bad week doesn't mean much.\n\nNothing here is financial advice, and no real money is involved.")
         self.send("👋 Start here", desc, BLUE, kind="info", edit="guide")
 
@@ -487,6 +535,18 @@ class Discord:
                 "**Honest** = yearly return in a 10-year backtest without the biggest hindsight winners.\n"
                 f"Under {st['live_days_needed']} trading days, live results are mostly noise.")
         self.send(f"🗓️ Weekly report card · {time.strftime('%b %d')}", desc, BLUE, url=SITE, kind="weekly")
+        t = self._track()
+        if t:
+            self.send(f"🧭 Track record · day {t['days']}", self._milestones_text(t) + f"\n\n{t['note']}", BLUE,
+                      [("Since the start", f"Account {t['ret']:+.2f}%" + (f" · S&P 500 {t['spy_ret']:+.2f}%" if t["spy_ret"] is not None else ""), True),
+                       ("Worst drop", f"{t['max_drawdown']:.1f}%", True),
+                       ("Up weeks", f"{t['weeks_up']} of {t['weeks_done']}" if t["weeks_done"] else "First week", True)],
+                      url=SITE, kind="weekly")
+
+
+def _bar(frac, width=12):
+    full = max(0, min(width, round(frac * width)))
+    return "▰" * full + "▱" * (width - full)
 
 
 def _holdings(pos, equity):

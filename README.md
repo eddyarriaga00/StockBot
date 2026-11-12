@@ -50,6 +50,16 @@ Charts are drawn by `app/chart.py` in pure Python (no extra packages), and nothi
   a health line, the strategy tournament, backtest vs SPY, today's scan with reasons, risk limits, activity log.
 - **Settings**: choose Simulator, Alpaca Paper, or Alpaca Live; paste Alpaca keys.
 
+## Track record
+The point of the simulator is to build a paper record worth trusting before any real money is involved. The **Bot** screen
+(and the "Day N" badge in the header, the Discord dashboard, the daily summary and the weekly report) shows how long the
+account has been running, how many trading days it has seen, whether StockBot was actually running on each of them,
+and seven milestones:
+60 trading days of results, ahead of the S&P 500, worst drop not much deeper than the S&P 500's, Sharpe ratio above 1,
+12 rebalances, coming through a 10% market sell-off, and no missed trading days in the last 20.
+Discord announces the ones that stay met once reached. Meeting all seven is a track record, not a guarantee.
+`app/calendar_us.py` knows US market holidays, so they don't count as trading days or as missed days.
+
 ## How the bot decides: a strategy tournament
 Nine strategies each trade their own fake $100,000 on live prices, side by side:
 Momentum Max, Momentum Weekly, Nasdaq 2x Trend, Trend Momentum, Concentrated Momentum, Dual Momentum, Sector Rotation, Dip Buyer, and Hold SPY (the baseline to beat). Momentum Max and Momentum Weekly rank stocks on blended 3/6/12-month risk-adjusted momentum, check every week, and keep current winners unless something is clearly stronger.
