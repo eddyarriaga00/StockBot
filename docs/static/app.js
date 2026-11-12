@@ -731,7 +731,7 @@ $("#cancel-all").addEventListener("click", async () => {
 });
 
 // ---------- bot ----------
-const PALETTE = { momentum_max: "#ff5c5c", momentum_weekly: "#00d1d1", nasdaq_2x: "#c8e64c", trend_momentum: "#22c38e", concentrated: "#f5b041", dual_momentum: "#4c8dff", sector_rotation: "#b07cff", dip_buyer: "#ff7eb6", spy_hold: "#8a94a3" };
+const PALETTE = { momentum_max: "#ff5c5c", momentum_weekly: "#00d1d1", nasdaq_2x: "#c8e64c", trend_momentum: "#22c38e", concentrated: "#f5b041", dual_momentum: "#4c8dff", sector_rotation: "#b07cff", dip_buyer: "#ff7eb6", high_52w: "#ffd166", core_blend: "#ffffff", spy_hold: "#8a94a3" };
 const lineChart = (el) => LightweightCharts.createChart(el, { ...chartOpts(), timeScale: { borderVisible: false, timeVisible: false, lockVisibleTimeRangeOnResize: true } });
 const btChart = lineChart($("#bt-chart"));
 const tChart = lineChart($("#t-chart"));
@@ -853,17 +853,32 @@ async function refreshTournament() {
   $("#t-champion").innerHTML = `<span class="champ">🏆 Champion: ${esc(champ?.name)}</span> · ${esc(t.reason)}`;
   const rows = [...t.rows].sort((a, b) => b.live_return - a.live_return || (b.bt_checked?.sharpe ?? 0) - (a.bt_checked?.sharpe ?? 0));
   $("#t-table").innerHTML = `<tr><th>Strategy</th><th class="r">Live return</th><th class="r">vs SPY</th><th class="r">Today</th><th class="r">Worst drop</th>
-    <th class="r">Trades</th><th class="r">Days live</th><th class="r">Backtest held-out /yr</th><th class="r" title="10-year backtest re-run without the 6 stocks that rose the most, so it can't cheat with hindsight">Honest backtest /yr</th><th class="r">Honest worst drop</th><th class="r">Honest Sharpe</th><th>Holding now</th></tr>` +
+    <th class="r">Trades</th><th class="r">Days live</th><th class="r">Backtest held-out /yr</th><th class="r" title="10-year backtest re-run without the 6 stocks that rose the most, so it can't cheat with hindsight">Honest backtest /yr</th><th class="r">Honest worst drop</th><th class="r" title="The weakest Sharpe ratio across three tests: without the biggest winners, on random halves of the stock list, and over 30 years. Above 1 is good.">Honest Sharpe</th><th>Holding now</th></tr>` +
     rows.map((r) => `<tr><td><b style="color:${PALETTE[r.key]}">${esc(r.name)}</b>${r.champion ? ' <span class="champ">🏆</span>' : ""}<span class="about">${esc(r.about)}</span></td>
       <td class="r ${cls(r.live_return)}">${pct(r.live_return)}</td><td class="r ${cls(r.vs_spy)}">${r.started ? (r.vs_spy >= 0 ? "+" : "") + r.vs_spy.toFixed(2) + " pts" : "—"}</td>
       <td class="r ${cls(r.day_pl_pct)}">${pct(r.day_pl_pct)}</td><td class="r">${r.live_max_drawdown.toFixed(1)}%</td>
       <td class="r">${r.trades}</td><td class="r">${r.trading_days}/${t.live_days_needed}</td>
-      <td class="r ${r.beats_spy_oos ? "up" : ""}">${pct(r.bt_oos.cagr)}</td><td class="r">${r.bt_checked ? pct(r.bt_checked.cagr) : "—"}</td><td class="r">${r.bt_checked ? r.bt_checked.max_drawdown.toFixed(1) + "%" : "—"}</td><td class="r">${r.bt_checked ? r.bt_checked.sharpe.toFixed(2) : "—"}</td>
+      <td class="r ${r.beats_spy_oos ? "up" : ""}">${pct(r.bt_oos.cagr)}</td><td class="r">${r.bt_checked ? pct(r.bt_checked.cagr) : "—"}</td><td class="r">${r.bt_checked ? r.bt_checked.max_drawdown.toFixed(1) + "%" : "—"}</td><td class="r">${r.honest_sharpe != null ? r.honest_sharpe.toFixed(2) : r.bt_checked ? r.bt_checked.sharpe.toFixed(2) : "—"}</td>
       <td class="muted small">${r.holdings.sort((a, b) => b.weight - a.weight).slice(0, 6).map((h) => `${h.symbol} ${h.weight.toFixed(0)}%`).join(", ") || "Waiting for market open"}</td></tr>`).join("");
+  renderCrashTest(t);
   const curves = await api("/api/tournament/curves").catch(() => ({}));
   setLines(tChart, tLines, curves);
   $("#t-legend").innerHTML = legend(Object.keys(curves));
   if (!$("#bot-strategy").options.length) renderBot();
+}
+
+function renderCrashTest(t) {
+  const wins = t.stress_windows || [];
+  $("#crash-card").classList.toggle("hidden", !wins.length);
+  if (!wins.length) return;
+  const rows = [...t.rows].filter((r) => r.bt_stress).sort((a, b) => (b.honest_sharpe ?? 0) - (a.honest_sharpe ?? 0));
+  const cell = (w) => !w ? '<td class="r muted" title="This strategy\'s funds did not exist yet">n/a</td>' : `<td class="r ${cls(w.ret)}" title="Worst drop inside this period: ${w.drop.toFixed(1)}%">${pct(w.ret)}</td>`;
+  $("#crash-table").innerHTML = `<tr><th>Strategy</th>${wins.map((w) => `<th class="r">${esc(w)}</th>`).join("")}
+    <th class="r">Worst drop since ${new Date((t.stress_start || 0) * 1000).getFullYear()}</th><th class="r">Per year since then</th>
+    <th class="r" title="How often the strategy beat SPY when it was only allowed a random 60% of the stock list (${t.subsets} tries)">Beat SPY on random halves</th></tr>` +
+    rows.map((r) => `<tr><td><b style="color:${PALETTE[r.key]}">${esc(r.name)}</b>${r.champion ? ' <span class="champ">🏆</span>' : ""}</td>
+      ${r.bt_stress.windows.map(cell).join("")}<td class="r">${r.bt_stress.full.max_drawdown.toFixed(1)}%</td><td class="r">${pct(r.bt_stress.full.cagr)}</td>
+      <td class="r">${r.bt_robust && !["spy_hold"].includes(r.key) ? r.bt_robust.beat_spy_pct.toFixed(0) + "%" : "—"}</td></tr>`).join("");
 }
 
 async function loadBacktest(force) {
