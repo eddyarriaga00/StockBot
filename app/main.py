@@ -16,7 +16,7 @@ from . import market, strategy
 from .alpaca_broker import AlpacaBroker
 from .bot import DEFAULT_BOT, Bot
 from .health import Health
-from .discord import DEFAULT_DISCORD, Discord, valid_webhook
+from .discord import CHANNELS, DEFAULT_DISCORD, Discord, valid_webhook
 from .sim_broker import OrderError, SimBroker
 from .publish import Publisher
 from .remote import Remote
@@ -37,6 +37,7 @@ DEFAULT_SETTINGS = {
     "watchlist": ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"],
     "bot": DEFAULT_BOT,
     "discord_webhook": "",
+    "discord_webhooks": {},  # optional: one webhook per kind of message (see discord.CHANNELS)
     "discord": DEFAULT_DISCORD,
 }
 _settings_lock = threading.Lock()
@@ -92,6 +93,7 @@ remote = Remote(DATA, PORT, on_url_change=lambda: publisher.publish())
 discord = Discord(DATA, load_settings, get_broker, tournament)
 health = Health(DATA)
 bot.on_log = discord.on_log
+discord.bot, discord.health = bot, health
 app = FastAPI(title="StockBot")
 
 OPEN_REMOTE_PATHS = {"/api/remote/ping", "/api/remote/login"}
@@ -337,6 +339,8 @@ def api_settings():
     s = load_settings()
     return {"broker": s["broker"], "bot": s["bot"], "discord": s["discord"], "discord_webhook": _mask(s["discord_webhook"]),
             "discord_error": discord.last_error,
+            "discord_channels": [{"kind": k, "name": n, "about": a, "set": bool(s["discord_webhooks"].get(k))}
+                                 for k, (n, a) in CHANNELS.items()],
             **{k: _mask(s[k]) for k in ("alpaca_paper_key", "alpaca_paper_secret", "alpaca_live_key", "alpaca_live_secret")}}
 
 
@@ -351,8 +355,21 @@ def api_save_settings(body: dict = Body(...)):
         if not valid_webhook(url):
             _err("That isn't a Discord webhook link. It should start with https://discord.com/api/webhooks/")
         s["discord_webhook"] = url
+    if isinstance(body.get("discord_webhooks"), dict):  # {kind: link} sets a channel, {kind: ""} removes it
+        hooks = dict(s.get("discord_webhooks") or {})
+        for k, v in body["discord_webhooks"].items():
+            v = (v or "").strip()
+            if k not in CHANNELS:
+                continue
+            if v and not valid_webhook(v):
+                _err(f"The link for #{CHANNELS[k][0]} isn't a Discord webhook link.")
+            if v:
+                hooks[k] = v
+            else:
+                hooks.pop(k, None)
+        s["discord_webhooks"] = hooks
     if body.get("discord_clear"):
-        s["discord_webhook"] = ""
+        s["discord_webhook"], s["discord_webhooks"] = "", {}
     if isinstance(body.get("discord"), dict):
         s["discord"] = {**s["discord"], **{k: bool(v) for k, v in body["discord"].items() if k in DEFAULT_DISCORD}}
     if "bot" in body:
@@ -437,14 +454,36 @@ def api_discord_test(body: dict = Body(default={})):
                        "[Open StockBot](https://eddyarriaga00.github.io/StockBot/)"}]}, url)
     if err:
         _err(err)
+    if not body.get("discord_webhook"):  # the Test button: also say hello in every separate channel
+        for kind in discord.webhooks():
+            name, about = CHANNELS[kind]
+            discord.send(f"✅ #{name} is connected", about, 0x22C38E, kind=kind)
+    return {"ok": True}
+
+
+@app.post("/api/discord/weekly")
+def api_discord_weekly():
+    """Post the tournament report card now (it also posts on its own every Friday after the close)."""
+    if not discord.connected():
+        _err("Connect Discord first.")
+    discord.weekly_report()
     return {"ok": True}
 
 
 @app.post("/api/discord/summary")
 def api_discord_summary():
-    if not load_settings()["discord_webhook"]:
+    if not discord.connected():
         _err("Connect Discord first.")
     discord.daily_summary()
+    return {"ok": True}
+
+
+@app.post("/api/discord/refresh")
+def api_discord_refresh():
+    """Post or update the start-here guide and the live dashboard right now."""
+    if not discord.connected():
+        _err("Connect Discord first.")
+    discord.refresh()
     return {"ok": True}
 
 

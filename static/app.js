@@ -771,6 +771,11 @@ function refreshDiscord(s) {
   if (!s.discord) return;
   const on = !!s.discord_webhook;
   $("#dc-url").placeholder = on ? `Connected (${s.discord_webhook})` : "https://discord.com/api/webhooks/…";
+  const box = $("#dc-channels");
+  if (box && !box.contains(document.activeElement)) {
+    box.innerHTML = (s.discord_channels || []).map((c) => `<label class="dc-ch"><span><b>#${c.name}</b><small class="muted">${c.about}</small></span>
+      <input data-dc-ch="${c.kind}" autocomplete="off" placeholder="${c.set ? "Connected. Paste a new link to replace, or type off to remove" : "https://discord.com/api/webhooks/…"}"></label>`).join("");
+  }
   $("#dc-status").textContent = on ? (s.discord_error ? "Last send failed: " + s.discord_error : "Connected. Messages go to your Discord channel.") : "Not connected.";
   $$("[data-dc]").forEach((c) => (c.checked = !!s.discord[c.dataset.dc]));
   ["#dc-test", "#dc-summary", "#dc-clear"].forEach((id) => ($(id).disabled = !on));
@@ -790,6 +795,21 @@ $$("[data-dc]").forEach((c) => c.addEventListener("change", async () => {
   try { await api("/api/settings", { method: "POST", body: { discord: { [c.dataset.dc]: c.checked } } }); }
   catch (e) { toast(e.message, "bad"); }
 }));
+$("#dc-ch-save").addEventListener("click", async () => {
+  const hooks = {};
+  $$("[data-dc-ch]").forEach((i) => { const v = i.value.trim(); if (v) hooks[i.dataset.dcCh] = v.toLowerCase() === "off" ? "" : v; });
+  if (!Object.keys(hooks).length) return toast("Paste at least one webhook link first.", "bad");
+  try {
+    await api("/api/settings", { method: "POST", body: { discord_webhooks: hooks } });
+    await api("/api/discord/refresh", { method: "POST" });
+    $$("[data-dc-ch]").forEach((i) => (i.value = ""));
+    toast("Channels saved.", "ok"); refreshSettings();
+  } catch (e) { toast(e.message, "bad"); }
+});
+$("#dc-refresh").addEventListener("click", async () => {
+  try { await api("/api/discord/refresh", { method: "POST" }); toast("Dashboard updated.", "ok"); }
+  catch (e) { toast(e.message, "bad"); }
+});
 $("#dc-test").addEventListener("click", async () => {
   try { await api("/api/discord/test", { method: "POST", body: {} }); toast("Test message sent.", "ok"); }
   catch (e) { toast(e.message, "bad"); }

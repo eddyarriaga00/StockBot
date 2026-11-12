@@ -30,6 +30,17 @@ a daily summary after the close (account value, day P/L vs SPY, holdings), and t
 In Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. Paste it in StockBot's
 Settings → Discord and click Connect. The link is stored only on this Mac.
 
+One webhook is enough, but each kind of message can have its own channel (Settings → Discord → Separate channels):
+- **#start-here**: a guide to the server, kept up to date.
+- **#dashboard**: one message edited in place every 5 minutes while the market is open (every 30 when closed):
+  account value, a 30-day chart, holdings, what the bot does next, the tournament top 5, and whether StockBot is healthy.
+- **#trades**: every fill with the bot's reason and how much of the account the position is now.
+- **#alerts**: approvals, loss halts, errors, missed trading days, and any holding that moves 4% or more in a day.
+- **#daily-summary**: the plan at the open, results with a chart after the close, and new all-time highs.
+- **#weekly-report**: the tournament table every Friday and any champion change.
+
+Charts are drawn by `app/chart.py` in pure Python (no extra packages), and nothing is sent anywhere except Discord.
+
 ## Screens
 - **Trade**: search, watchlist, live charts (1D to MAX, line or candles), key stats, news, and an order ticket
   (market / limit / stop / stop-limit / trailing stop, shares or dollars, day or GTC, take-profit / stop-loss) with a review step.
