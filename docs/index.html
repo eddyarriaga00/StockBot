@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StockBot</title>
   <meta name="description" content="StockBot: a trading bot that runs a live tournament of strategies on fake money. Watch its trades, charts, and results.">
-  <link rel="stylesheet" href="static/style.css?v=8">
+  <link rel="stylesheet" href="static/style.css?v=9">
   <script src="static/vendor/lightweight-charts.js"></script>
 </head>
 <body>
@@ -278,7 +278,16 @@
       <label class="switch"><input type="checkbox" data-dc="alerts"><span></span><b>Alerts</b></label>
       <label class="switch"><input type="checkbox" data-dc="daily"><span></span><b>Daily summary</b></label>
       <label class="switch"><input type="checkbox" data-dc="weekly"><span></span><b>Weekly report</b></label>
+      <label class="switch"><input type="checkbox" data-dc="dashboard"><span></span><b>Live dashboard</b></label>
+      <label class="switch"><input type="checkbox" data-dc="movers"><span></span><b>Big-move alerts</b></label>
     </div>
+    <details class="dc-channels">
+      <summary>Separate channels (optional)</summary>
+      <p class="muted small">Give a channel its own webhook and that kind of message goes there instead of the main channel.
+        The dashboard and the start-here guide only appear when they have their own channel.</p>
+      <div id="dc-channels"></div>
+      <div class="row"><button id="dc-ch-save" class="primary">Save channels</button><button id="dc-refresh" class="ghost">Update dashboard now</button></div>
+    </details>
     <div class="row"><button id="dc-test" class="ghost">Send test message</button><button id="dc-summary" class="ghost">Send summary now</button><button id="dc-clear" class="danger">Disconnect</button></div>
   </div>
   <div class="card">
@@ -289,7 +298,7 @@
 </main>
 
 <div id="toasts"></div>
-<script src="static/app.js?v=9"></script>
+<script src="static/app.js?v=10"></script>
 <script src="static/learn.js?v=1"></script>
 </body>
 </html>
